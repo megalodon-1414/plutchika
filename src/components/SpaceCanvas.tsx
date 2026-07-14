@@ -27,6 +27,11 @@ import {
   getSpaceOverviewCameraPosition,
 } from '../utils/explorationMode';
 import { getEmotionCenter } from '../utils/emotionSpaceLayout';
+import {
+  HIERARCHY_CAMERA_FOV,
+  HIERARCHY_CAMERA_POSITION,
+  HIERARCHY_CAMERA_TARGET,
+} from '../utils/emotionHierarchyLayout';
 import { findLinkedWarpDestination } from '../utils/warpGateLink';
 import {
   MAX_MOVABLE_NEARBY_STARS,
@@ -36,6 +41,7 @@ import {
 import { findPlotByKey, getPlotKey } from '../utils/plotIdentity';
 import type { MinimapSyncState } from '../utils/emotionMinimapLayout';
 import { EmotionDirectionArrows } from './EmotionDirectionArrows';
+import { EmotionHierarchyBrowse } from './EmotionHierarchyBrowse';
 import { EmotionSpaceAreas } from './EmotionSpaceAreas';
 import { EmotionSystemOverview } from './EmotionSystemOverview';
 import { ExplorationDistantPlotCloud } from './ExplorationDistantPlotCloud';
@@ -43,7 +49,7 @@ import { GravityAttractionParticles } from './GravityAttractionParticles';
 import { OrbitTrail } from './OrbitTrail';
 import { WarpGate } from './WarpGate';
 import { WordPlot } from './WordPlot';
-import type { EmotionId } from '../data/emotions';
+import type { BasicEmotionId, EmotionId } from '../data/emotions';
 
 const DEFAULT_CAMERA_POSITION: [number, number, number] = [0, 3, 18];
 const DEFAULT_CAMERA_TARGET: [number, number, number] = [0, 0, 0];
@@ -79,6 +85,14 @@ interface SpaceCanvasProps {
   spaceOverview?: boolean;
   /** 俯瞰開始時点で手前に置く星系（直前までいた主感情） */
   spaceOverviewFocusId?: EmotionId | null;
+  /**
+   * 階層ブラウズ表示（基本8 → 選択時に関連合成感情）。
+   * true の間は単語探索シーンを出さず、既存 UI は呼び出し側で隠す想定。
+   */
+  hierarchyBrowse?: boolean;
+  hierarchyFrontBasicId?: BasicEmotionId;
+  hierarchyConfirmedBasicId?: BasicEmotionId | null;
+  onHierarchyFrontBasicChange?: (id: BasicEmotionId) => void;
   flowLabelExpiresAt?: Readonly<Record<string, number>>;
   flowLabelNow?: number;
   plotLabelDisplayMode?: PlotLabelDisplayMode;
@@ -115,6 +129,7 @@ interface CameraControlsProps {
   interactionLockRef?: MutableRefObject<boolean>;
   spaceOverview?: boolean;
   spaceOverviewFocusId?: EmotionId | null;
+  hierarchyBrowse?: boolean;
   onCameraStateChange?: (state: Pick<MinimapSyncState, 'cameraPosition' | 'cameraTarget' | 'cameraUp'>) => void;
 }
 
@@ -140,6 +155,7 @@ function CameraControls({
   interactionLockRef,
   spaceOverview = false,
   spaceOverviewFocusId = null,
+  hierarchyBrowse = false,
   onCameraStateChange,
 }: CameraControlsProps) {
   const { camera, gl, size } = useThree();
@@ -170,8 +186,8 @@ function CameraControls({
 
   const focusDistance = explorationFocus ? explorationDistance : SELECTION_CAMERA_DISTANCE;
   const screenAnchor = explorationFocus ? explorationAnchor : undefined;
-  const enableRotate = !focusOnSelection || explorationFocus;
-  const enableZoom = !focusOnSelection;
+  const enableRotate = hierarchyBrowse ? false : (!focusOnSelection || explorationFocus);
+  const enableZoom = hierarchyBrowse ? false : !focusOnSelection;
 
   const setFocusPhase = (phase: FocusPhase) => {
     focusPhase.current = phase;
@@ -343,6 +359,23 @@ function CameraControls({
   }, [camera, gl, enableRotate, enableZoom, interactionLockRef]);
 
   useFrame((state, delta) => {
+    if (hierarchyBrowse) {
+      camera.position.set(...HIERARCHY_CAMERA_POSITION);
+      camera.up.set(0, 1, 0);
+      smoothTarget.current.set(...HIERARCHY_CAMERA_TARGET);
+      desiredTarget.current.set(...HIERARCHY_CAMERA_TARGET);
+      baseTarget.current.set(...HIERARCHY_CAMERA_TARGET);
+      if (camera instanceof THREE.PerspectiveCamera) {
+        if (camera.fov !== HIERARCHY_CAMERA_FOV) {
+          camera.fov = HIERARCHY_CAMERA_FOV;
+          camera.updateProjectionMatrix();
+        }
+        clearSelectionViewOffset(camera);
+      }
+      camera.lookAt(smoothTarget.current);
+      return;
+    }
+
     if (followPlot) {
       baseTarget.current.set(
         ...plotPositionFromRow(
@@ -482,11 +515,21 @@ function CameraControls({
   useEffect(() => {
     if (resetCount === 0) return;
 
-    const resetPosition = spaceOverview
-      ? getSpaceOverviewCameraPosition(spaceOverviewFocusId)
-      : DEFAULT_CAMERA_POSITION;
-    const resetTarget = spaceOverview ? SPACE_OVERVIEW_CAMERA_TARGET : DEFAULT_CAMERA_TARGET;
-    const resetFov = spaceOverview ? SPACE_OVERVIEW_CAMERA_FOV : DEFAULT_CAMERA_FOV;
+    const resetPosition = hierarchyBrowse
+      ? HIERARCHY_CAMERA_POSITION
+      : spaceOverview
+        ? getSpaceOverviewCameraPosition(spaceOverviewFocusId)
+        : DEFAULT_CAMERA_POSITION;
+    const resetTarget = hierarchyBrowse
+      ? HIERARCHY_CAMERA_TARGET
+      : spaceOverview
+        ? SPACE_OVERVIEW_CAMERA_TARGET
+        : DEFAULT_CAMERA_TARGET;
+    const resetFov = hierarchyBrowse
+      ? HIERARCHY_CAMERA_FOV
+      : spaceOverview
+        ? SPACE_OVERVIEW_CAMERA_FOV
+        : DEFAULT_CAMERA_FOV;
 
     camera.position.set(...resetPosition);
     camera.up.set(0, 1, 0);
@@ -505,7 +548,7 @@ function CameraControls({
     zoomProgress.current = 0;
     setFocusPhase('idle');
     prevFocusOnSelection.current = false;
-  }, [resetCount, camera, spaceOverview, spaceOverviewFocusId]);
+  }, [resetCount, camera, spaceOverview, spaceOverviewFocusId, hierarchyBrowse]);
 
   return null;
 }
@@ -670,6 +713,10 @@ export function SpaceCanvas({
   explorationMode = false,
   spaceOverview = false,
   spaceOverviewFocusId = null,
+  hierarchyBrowse = false,
+  hierarchyFrontBasicId = 'fear',
+  hierarchyConfirmedBasicId = null,
+  onHierarchyFrontBasicChange,
   flowLabelExpiresAt,
   flowLabelNow = 0,
   plotLabelDisplayMode = 'flow',
@@ -695,6 +742,16 @@ export function SpaceCanvas({
   const [viewAlignRequest, setViewAlignRequest] = useState<CameraViewAlignRequest | null>(null);
   const cameraInteractionLockRef = useRef(false);
   const prevSpaceOverview = useRef(spaceOverview);
+  const hierarchyBootstrapped = useRef(false);
+
+  useEffect(() => {
+    if (!hierarchyBrowse || hierarchyBootstrapped.current) {
+      return;
+    }
+    hierarchyBootstrapped.current = true;
+    setIsDefaultView(true);
+    setResetCount((count) => count + 1);
+  }, [hierarchyBrowse]);
 
   useEffect(() => {
     if (spaceOverview === prevSpaceOverview.current) {
@@ -736,6 +793,9 @@ export function SpaceCanvas({
   }, [isSelectedPureOrbiting, selectedPlot?.primaryId]);
 
   const cameraTarget = useMemo((): [number, number, number] => {
+    if (hierarchyBrowse) {
+      return HIERARCHY_CAMERA_TARGET;
+    }
     if (spaceOverview || isDefaultView || !selectedId) {
       return spaceOverview ? SPACE_OVERVIEW_CAMERA_TARGET : DEFAULT_CAMERA_TARGET;
     }
@@ -746,7 +806,7 @@ export function SpaceCanvas({
 
     // 公転・同意義回転中も単語自体を中心にする（followPlot が毎フレーム追従）
     return plotPositionFromRow(selectedPlot, 0, selectedMixedOrbit);
-  }, [isDefaultView, selectedId, selectedPlot, selectedMixedOrbit, spaceOverview]);
+  }, [hierarchyBrowse, isDefaultView, selectedId, selectedPlot, selectedMixedOrbit, spaceOverview]);
 
   const nearbyPlotIds = useMemo(() => {
     if (spaceOverview || !selectedId || isDefaultView) {
@@ -816,7 +876,7 @@ export function SpaceCanvas({
     );
   }, [explorationMode, nearbyPlotIds, plots, selectedId, selectedPlot, spaceOverview]);
 
-  const isExplorationFocused = explorationMode && !spaceOverview && !isDefaultView && selectedId !== null;
+  const isExplorationFocused = explorationMode && !hierarchyBrowse && !spaceOverview && !isDefaultView && selectedId !== null;
 
   const warpGatePlots = useMemo(() => {
     if (spaceOverview || !explorationMode || isDefaultView || !selectedPlot) {
@@ -1001,53 +1061,61 @@ export function SpaceCanvas({
         <CameraControls
           resetCount={resetCount}
           cameraTarget={cameraTarget}
-          focusOnSelection={isExplorationFocused || (!explorationMode && !isDefaultView && selectedId !== null)}
+          focusOnSelection={isExplorationFocused || (!explorationMode && !hierarchyBrowse && !isDefaultView && selectedId !== null)}
           explorationFocus={isExplorationFocused}
           explorationAnchor={EXPLORATION_SCREEN_ANCHOR}
           explorationDistance={EXPLORATION_CAMERA_DISTANCE}
-          followPlot={isSelectedOrbitingPlot && !spaceOverview ? selectedPlot : null}
+          followPlot={isSelectedOrbitingPlot && !spaceOverview && !hierarchyBrowse ? selectedPlot : null}
           followOrbitOverride={selectedMixedOrbit}
           followOrbitTimeScale={getOrbitTimeScale(selectedPlot)}
-          viewAlignRequest={spaceOverview ? null : viewAlignRequest}
+          viewAlignRequest={spaceOverview || hierarchyBrowse ? null : viewAlignRequest}
           interactionLockRef={cameraInteractionLockRef}
           spaceOverview={spaceOverview}
           spaceOverviewFocusId={spaceOverviewFocusId}
+          hierarchyBrowse={hierarchyBrowse}
           onCameraStateChange={handleCameraStateChange}
         />
         <MinimapFocusTracker
           plot={selectedPlot}
-          active={!spaceOverview && !isDefaultView && selectedPlot !== null}
-          clearWhenInactive={!spaceOverview}
+          active={!hierarchyBrowse && !spaceOverview && !isDefaultView && selectedPlot !== null}
+          clearWhenInactive={!spaceOverview && !hierarchyBrowse}
           orbitOverride={selectedPlot ? mixedOrbitOverrides.get(selectedPlot.word_id) : undefined}
           orbitTimeScale={getOrbitTimeScale(selectedPlot)}
           cameraState={cameraState}
           onChange={handleMinimapSync}
         />
         <OverviewMinimapSync
-          active={spaceOverview}
+          active={spaceOverview && !hierarchyBrowse}
           cameraState={cameraState}
           focusEmotionId={overviewMinimapFocusId}
           onChange={handleMinimapSync}
         />
         <SelectedScreenPointTracker
           plot={selectedPlot}
-          active={explorationMode && !spaceOverview && !isDefaultView && selectedPlot !== null}
+          active={explorationMode && !hierarchyBrowse && !spaceOverview && !isDefaultView && selectedPlot !== null}
           orbitOverride={selectedPlot ? mixedOrbitOverrides.get(selectedPlot.word_id) : undefined}
           orbitTimeScale={getOrbitTimeScale(selectedPlot)}
           onChange={onSelectedScreenPosition}
         />
         <SelectedScreenPointTracker
           plot={hoveredPlot}
-          active={explorationMode && !spaceOverview && !isDefaultView && hoveredPlot !== null}
+          active={explorationMode && !hierarchyBrowse && !spaceOverview && !isDefaultView && hoveredPlot !== null}
           orbitOverride={hoveredPlot ? mixedOrbitOverrides.get(hoveredPlot.word_id) : undefined}
           orbitTimeScale={getOrbitTimeScale(hoveredPlot)}
           onChange={onHoveredScreenPosition}
         />
 
-        <EmotionSpaceAreas lite={explorationMode && !spaceOverview} />
+        <EmotionSpaceAreas lite={explorationMode && !spaceOverview && !hierarchyBrowse} />
 
         <Suspense fallback={null}>
-          {spaceOverview && (
+          {hierarchyBrowse && (
+            <EmotionHierarchyBrowse
+              frontBasicId={hierarchyFrontBasicId}
+              confirmedBasicId={hierarchyConfirmedBasicId}
+              onFrontBasicChange={onHierarchyFrontBasicChange}
+            />
+          )}
+          {!hierarchyBrowse && spaceOverview && (
             <EmotionSystemOverview
               focusEmotionId={spaceOverviewFocusId}
               onSelectSystem={onSelectEmotionSystem}
@@ -1057,7 +1125,7 @@ export function SpaceCanvas({
               }}
             />
           )}
-          {selectedOrbitCenter && selectedPlot && !spaceOverview && (
+          {!hierarchyBrowse && selectedOrbitCenter && selectedPlot && !spaceOverview && (
             <pointLight
               position={selectedOrbitCenter}
               color={getPrimaryEmotionColor(selectedPlot.primaryId)}
@@ -1066,7 +1134,7 @@ export function SpaceCanvas({
               decay={2}
             />
           )}
-          {explorationMode && selectedPlot && !spaceOverview && !isDefaultView && !isSelectedPureOrbiting && (
+          {!hierarchyBrowse && explorationMode && selectedPlot && !spaceOverview && !isDefaultView && !isSelectedPureOrbiting && (
             <GravityAttractionParticles
               plot={selectedPlot}
               orbitOverride={mixedOrbitOverrides.get(selectedPlot.word_id)}
@@ -1077,7 +1145,7 @@ export function SpaceCanvas({
                 )}
             />
           )}
-          {explorationMode && selectedPlot && !spaceOverview && !isDefaultView && (
+          {!hierarchyBrowse && explorationMode && selectedPlot && !spaceOverview && !isDefaultView && (
             <EmotionDirectionArrows
               plot={selectedPlot}
               plots={plots}
@@ -1087,7 +1155,7 @@ export function SpaceCanvas({
               interactionLockRef={cameraInteractionLockRef}
             />
           )}
-          {!spaceOverview && visibleWarpGateEntries.map((entry) => (
+          {!hierarchyBrowse && !spaceOverview && visibleWarpGateEntries.map((entry) => (
             <WarpGate
               key={entry.key}
               targetEmotionId={entry.plot.secondaryId}
@@ -1105,7 +1173,7 @@ export function SpaceCanvas({
               onHoverScreenPosition={onHoveredScreenPosition}
             />
           ))}
-          {!spaceOverview && sameEmotionOrbitPlots.map((plot) => (
+          {!hierarchyBrowse && !spaceOverview && sameEmotionOrbitPlots.map((plot) => (
             <OrbitTrail
               key={`same-emotion-orbit-${plot.word_id}`}
               plot={plot}
@@ -1117,12 +1185,14 @@ export function SpaceCanvas({
               orbitTimeScale={getOrbitTimeScale(plot)}
             />
           ))}
-          <ExplorationDistantPlotCloud
-            sameSystemPlots={distantSameSystemPlots}
-            otherSystemPlots={distantOtherSystemPlots}
-            orbitOverrides={mixedOrbitOverrides}
-          />
-          {interactivePlots.map((plot) => (
+          {!hierarchyBrowse && (
+            <ExplorationDistantPlotCloud
+              sameSystemPlots={distantSameSystemPlots}
+              otherSystemPlots={distantOtherSystemPlots}
+              orbitOverrides={mixedOrbitOverrides}
+            />
+          )}
+          {!hierarchyBrowse && interactivePlots.map((plot) => (
             <WordPlot
               key={getPlotKey(plot)}
               plot={plot}

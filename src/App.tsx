@@ -29,7 +29,8 @@ import { DEFAULT_EMOTION_UI_ACCENT, getEmotionUiTheme } from './utils/emotionUiT
 import { resolvePrimaryEmotionLabel } from './utils/emotionCoordinates';
 import { filterPlotsByTags, getPlotKindLabel, type PlotTagId } from './utils/plotTags';
 import { mergeWithSeedPlots } from './utils/seedPlots';
-import type { EmotionId } from './data/emotions';
+import type { BasicEmotionId, EmotionId } from './data/emotions';
+import { getBasicEmotion } from './data/emotions';
 import {
   SEARCH_GAME_MIN_REFERENCE_HOPS,
   SEARCH_GAME_UNREACHABLE_DISTANCE,
@@ -69,6 +70,10 @@ function App() {
   const [minimapSync, setMinimapSync] = useState<MinimapSyncState | null>(null);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<PlotTagId>>(() => new Set());
   const [isExplorationMode] = useState(true);
+  /** 基本8 → 合成感情の階層ブラウズ（既存探索 UI は残しつつ一旦こちらを正面に） */
+  const [hierarchyBrowseMode] = useState(true);
+  const [hierarchyFrontBasicId, setHierarchyFrontBasicId] = useState<BasicEmotionId>('fear');
+  const [hierarchyConfirmedBasicId, setHierarchyConfirmedBasicId] = useState<BasicEmotionId | null>(null);
   const [spaceOverview, setSpaceOverview] = useState(false);
   const [spaceOverviewFocusId, setSpaceOverviewFocusId] = useState<EmotionId | null>(null);
   const [overviewHoveredEmotionId, setOverviewHoveredEmotionId] = useState<EmotionId | null>(null);
@@ -544,6 +549,7 @@ function App() {
 
   const showInfoGuideLine =
     isExplorationMode &&
+    !hierarchyBrowseMode &&
     !spaceOverview &&
     isInfoPanelVisible &&
     infoPanelPlot &&
@@ -724,6 +730,7 @@ function App() {
 
   const showHoverGuide =
     isExplorationMode &&
+    !hierarchyBrowseMode &&
     !spaceOverview &&
     isInfoPanelVisible &&
     nextWordLabel &&
@@ -784,6 +791,15 @@ function App() {
           explorationMode={isExplorationMode}
           spaceOverview={spaceOverview}
           spaceOverviewFocusId={spaceOverviewFocusId}
+          hierarchyBrowse={hierarchyBrowseMode}
+          hierarchyFrontBasicId={hierarchyFrontBasicId}
+          hierarchyConfirmedBasicId={hierarchyConfirmedBasicId}
+          onHierarchyFrontBasicChange={(id) => {
+            setHierarchyFrontBasicId(id);
+            if (hierarchyConfirmedBasicId && hierarchyConfirmedBasicId !== id) {
+              setHierarchyConfirmedBasicId(null);
+            }
+          }}
           flowLabelExpiresAt={flowLabelExpiresAt}
           flowLabelNow={flowLabelNow}
           plotLabelDisplayMode={plotLabelDisplayMode}
@@ -799,7 +815,86 @@ function App() {
           onOverviewHoverEmotion={handleOverviewHoverEmotion}
         />
 
-        {isExplorationMode && searchGameTargetPlot && searchGameDistance != null && (
+        {hierarchyBrowseMode && (
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%',
+              bottom: '28px',
+              transform: 'translateX(-50%)',
+              zIndex: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '12px',
+              pointerEvents: 'none',
+            }}
+          >
+            <div
+              style={{
+                padding: '10px 16px',
+                borderRadius: '10px',
+                border: `1px solid ${emotionUiTheme.accentBorder}`,
+                backgroundColor: emotionUiTheme.panelBackground,
+                color: emotionUiTheme.textPrimary,
+                fontSize: '0.84rem',
+                letterSpacing: '0.06em',
+                backdropFilter: 'blur(12px)',
+                transition: UI_COLOR_TRANSITION,
+                textAlign: 'center',
+              }}
+            >
+              {hierarchyConfirmedBasicId
+                ? `${getBasicEmotion(hierarchyConfirmedBasicId).label} の合成感情`
+                : `手前: ${getBasicEmotion(hierarchyFrontBasicId).label} · ほかを押すと回転`}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', pointerEvents: 'auto' }}>
+              {hierarchyConfirmedBasicId ? (
+                <button
+                  type="button"
+                  onClick={() => setHierarchyConfirmedBasicId(null)}
+                  style={{
+                    padding: '12px 22px',
+                    borderRadius: '999px',
+                    border: `1px solid ${emotionUiTheme.controlBorder}`,
+                    backgroundColor: emotionUiTheme.controlBackground,
+                    color: emotionUiTheme.controlText,
+                    fontSize: '0.9rem',
+                    letterSpacing: '0.1em',
+                    cursor: 'pointer',
+                    backdropFilter: 'blur(10px)',
+                    transition: UI_COLOR_TRANSITION,
+                  }}
+                >
+                  戻る
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setHierarchyConfirmedBasicId(hierarchyFrontBasicId)}
+                  style={{
+                    padding: '12px 28px',
+                    borderRadius: '999px',
+                    border: `1px solid ${emotionUiTheme.accentBorderStrong}`,
+                    backgroundColor: emotionUiTheme.panelBackground,
+                    color: emotionUiTheme.textPrimary,
+                    fontSize: '0.95rem',
+                    letterSpacing: '0.14em',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: `0 0 0 1px ${emotionUiTheme.accentBorder}, 0 8px 24px rgba(0,0,0,0.35)`,
+                    transition: UI_COLOR_TRANSITION,
+                  }}
+                >
+                  決定 · {getBasicEmotion(hierarchyFrontBasicId).label}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isExplorationMode && !hierarchyBrowseMode && searchGameTargetPlot && searchGameDistance != null && (
           <SearchGameHud
             targetWord={searchGameTargetPlot.word_id}
             distance={searchGameFound ? 0 : searchGameDistance}
@@ -816,7 +911,7 @@ function App() {
           />
         )}
 
-        {isExplorationMode && (
+        {isExplorationMode && !hierarchyBrowseMode && (
           <div
             style={{
               position: 'absolute',
@@ -874,7 +969,7 @@ function App() {
           </div>
         )}
 
-        {isExplorationMode && (
+        {isExplorationMode && !hierarchyBrowseMode && (
           <div
             style={{
               position: 'absolute',
@@ -964,7 +1059,7 @@ function App() {
           </svg>
         )}
 
-        {isExplorationMode && !spaceOverview && infoPanelPlot && (
+        {isExplorationMode && !hierarchyBrowseMode && !spaceOverview && infoPanelPlot && (
           <div
             ref={nextWordPanelRef}
             style={{
@@ -1111,7 +1206,7 @@ function App() {
           </button>
         )}
 
-        {panelMorph && isExplorationMode && !spaceOverview && (
+        {panelMorph && isExplorationMode && !hierarchyBrowseMode && !spaceOverview && (
             <div
               aria-hidden
               style={{
@@ -1311,7 +1406,7 @@ function App() {
             </div>
         )}
 
-        {isExplorationMode && !spaceOverview && infoPanelPlot && (
+        {isExplorationMode && !hierarchyBrowseMode && !spaceOverview && infoPanelPlot && (
           <aside
             ref={currentWordAsideRef}
             style={{

@@ -82,3 +82,8 @@ export function getEmotionById(id: EmotionId): BasicEmotion | DyadEmotion {
   }
   return DYAD_EMOTIONS.find((emotion) => emotion.id === id)!;
 }
+
+/** 24合成感情のうち、指定の基本感情を成分に含むもの */
+export function getDyadsContainingBasic(basicId: BasicEmotionId): DyadEmotion[] {
+  return DYAD_EMOTIONS.filter((dyad) => dyad.components.includes(basicId));
+}
