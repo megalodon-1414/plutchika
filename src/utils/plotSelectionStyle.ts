@@ -1,0 +1,2 @@
+export const SELECTED_PLOT_SCALE = 1.45;
+export const EXPLORATION_SELECTED_PLOT_SCALE = 4.1;
