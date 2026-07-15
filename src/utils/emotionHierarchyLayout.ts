@@ -11,8 +11,10 @@ import type { Vec3 } from './emotionSpaceLayout';
 /** 基本8感情のリング（ローカル平面上） */
 export const HIERARCHY_BASIC_RING_RADIUS = 5.2;
 export const HIERARCHY_BASIC_Y = 0;
-/** 全感情同一サイズ（遠近はカメラ透視のみで決める） */
+/** 基本球の基準半径（選択中は拡大・非選択は縮小して掛ける） */
 export const HIERARCHY_BASIC_SPHERE_RADIUS = 0.7;
+export const HIERARCHY_FRONT_SPHERE_SCALE = 1.242;
+export const HIERARCHY_IDLE_SPHERE_SCALE = 0.682;
 
 /**
  * リング軸の傾き（左奥）
@@ -21,13 +23,20 @@ export const HIERARCHY_BASIC_SPHERE_RADIUS = 0.7;
 export const HIERARCHY_WHEEL_TILT_X = 0.2;
 export const HIERARCHY_WHEEL_TILT_Z = 0.45;
 
-/** 選択感情の直下に広げる合成感情リング */
+/** 決定後: 合成感情は8感情と同じ円位置。選んだ基本感情は円の軸（法線）延長上に小さく置く */
+export const HIERARCHY_CONFIRMED_AXIS_HEIGHT = 3.15;
+export const HIERARCHY_CONFIRMED_BASIC_SCALE = 0.72;
+export const HIERARCHY_CONFIRMED_MOVE_LERP = 5.2;
+export const HIERARCHY_CHILD_SPHERE_RADIUS = 0.48;
+
+/** 旧レイアウト互換（親直下リング用） */
 export const HIERARCHY_CHILD_RING_RADIUS = 2.35;
 export const HIERARCHY_CHILD_DROP = 2.8;
-export const HIERARCHY_CHILD_SPHERE_RADIUS = 0.48;
 
 /** 広い画角で手前を大きく・奥を小さく見せる */
 export const HIERARCHY_CAMERA_FOV = 105;
+/** 選択中の球体を置く画面位置（0〜1、原点は左下。0.5/0.5 が中央） */
+export const HIERARCHY_SCREEN_ANCHOR = { x: 0.5, y: 0.35 };
 
 export const HIERARCHY_SPIN_LERP = 6.4;
 
@@ -69,8 +78,19 @@ export function getHierarchySelectionSlotWorld(): Vec3 {
   return { x: world.x, y: world.y, z: world.z };
 }
 
+export type HierarchyCameraDebugInfo = {
+  position: [number, number, number];
+  target: [number, number, number];
+  fov: number;
+  slotOffset: [number, number, number];
+  targetYOffset: number;
+  screenAnchor: { x: number; y: number };
+};
+
 /** 選択中スロットから見たカメラの相対位置（近づけてフレーミング） */
-const HIERARCHY_CAMERA_SLOT_OFFSET = new THREE.Vector3(-0.45, 1.55, 2.35);
+const HIERARCHY_CAMERA_SLOT_OFFSET = new THREE.Vector3(-0.379, 0.869, 1.802);
+/** 注視点のスロットからの Y オフセット */
+const HIERARCHY_CAMERA_TARGET_Y_OFFSET = 0.12;
 
 function buildHierarchyCameraFromSlot(): {
   position: [number, number, number];
@@ -80,13 +100,84 @@ function buildHierarchyCameraFromSlot(): {
   const position = slot.clone().add(HIERARCHY_CAMERA_SLOT_OFFSET);
   return {
     position: [position.x, position.y, position.z],
-    target: [slot.x, slot.y + 0.12, slot.z],
+    target: [slot.x, slot.y + HIERARCHY_CAMERA_TARGET_Y_OFFSET, slot.z],
   };
 }
 
 const hierarchyCamera = buildHierarchyCameraFromSlot();
 export const HIERARCHY_CAMERA_POSITION = hierarchyCamera.position;
 export const HIERARCHY_CAMERA_TARGET = hierarchyCamera.target;
+
+/** 決定後の合成感情リング（8感情と同じ円・傾きグループ内ローカル） */
+export function getConfirmedChildRingPositions(parentId: BasicEmotionId): Array<{
+  dyad: DyadEmotion;
+  position: Vec3;
+  color: string;
+  angleRad: number;
+}> {
+  const dyads = getRelatedDyadsSorted(parentId);
+  const n = dyads.length || 1;
+
+  return dyads.map((dyad, index) => {
+    const angleRad = (index / n) * Math.PI * 2 - Math.PI / 2;
+    const [a, b] = dyad.components;
+    return {
+      dyad,
+      position: {
+        x: HIERARCHY_BASIC_RING_RADIUS * Math.cos(angleRad),
+        y: HIERARCHY_BASIC_Y,
+        z: HIERARCHY_BASIC_RING_RADIUS * Math.sin(angleRad),
+      },
+      color: blendHex(getBasicEmotion(a).color, getBasicEmotion(b).color),
+      angleRad,
+    };
+  });
+}
+
+/** 任意のローカル角の感情を固定スロットへ運ぶ Y 回転角 */
+export function getHierarchySpinForAngle(angleRad: number): number {
+  return angleRad - HIERARCHY_FRONT_LOCAL_ANGLE;
+}
+
+/** 決定後に基本感情が座る軸上ローカル座標 */
+export function getConfirmedBasicAxisLocal(): Vec3 {
+  return { x: 0, y: HIERARCHY_CONFIRMED_AXIS_HEIGHT, z: 0 };
+}
+
+export function getHierarchyCameraDebugFromLive(
+  position: THREE.Vector3 | [number, number, number],
+  target: THREE.Vector3 | [number, number, number],
+  fov: number,
+  screenAnchor: { x: number; y: number },
+): HierarchyCameraDebugInfo {
+  const slot = getHierarchySelectionSlotWorld();
+  const pos = Array.isArray(position)
+    ? { x: position[0], y: position[1], z: position[2] }
+    : { x: position.x, y: position.y, z: position.z };
+  const tgt = Array.isArray(target)
+    ? { x: target[0], y: target[1], z: target[2] }
+    : { x: target.x, y: target.y, z: target.z };
+
+  return {
+    position: [round3(pos.x), round3(pos.y), round3(pos.z)],
+    target: [round3(tgt.x), round3(tgt.y), round3(tgt.z)],
+    fov: round3(fov),
+    slotOffset: [
+      round3(pos.x - slot.x),
+      round3(pos.y - slot.y),
+      round3(pos.z - slot.z),
+    ],
+    targetYOffset: round3(tgt.y - slot.y),
+    screenAnchor: {
+      x: round3(screenAnchor.x),
+      y: round3(screenAnchor.y),
+    },
+  };
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
 
 export function getHierarchyBasicPosition(id: BasicEmotionId): Vec3 {
   const emotion = getBasicEmotion(id);
@@ -120,8 +211,7 @@ export function getHierarchyBasicCenters(): Array<{
  * θ − φ = FRONT となるよう φ = θ − FRONT とする。
  */
 export function getHierarchySpinForBasic(id: BasicEmotionId): number {
-  const angleRad = (getBasicEmotion(id).angle * Math.PI) / 180;
-  return angleRad - HIERARCHY_FRONT_LOCAL_ANGLE;
+  return getHierarchySpinForAngle((getBasicEmotion(id).angle * Math.PI) / 180);
 }
 
 export function shortestAngleDelta(from: number, to: number): number {

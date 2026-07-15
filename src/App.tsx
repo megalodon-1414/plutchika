@@ -845,7 +845,7 @@ function App() {
               }}
             >
               {hierarchyConfirmedBasicId
-                ? `${getBasicEmotion(hierarchyConfirmedBasicId).label} の合成感情`
+                ? `${getBasicEmotion(hierarchyConfirmedBasicId).label} の合成感情 · 押すと手前へ`
                 : `手前: ${getBasicEmotion(hierarchyFrontBasicId).label} · ほかを押すと回転`}
             </div>
             <div style={{ display: 'flex', gap: '10px', pointerEvents: 'auto' }}>

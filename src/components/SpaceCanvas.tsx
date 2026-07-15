@@ -31,6 +31,7 @@ import {
   HIERARCHY_CAMERA_FOV,
   HIERARCHY_CAMERA_POSITION,
   HIERARCHY_CAMERA_TARGET,
+  HIERARCHY_SCREEN_ANCHOR,
 } from '../utils/emotionHierarchyLayout';
 import { findLinkedWarpDestination } from '../utils/warpGateLink';
 import {
@@ -92,6 +93,7 @@ interface SpaceCanvasProps {
   hierarchyBrowse?: boolean;
   hierarchyFrontBasicId?: BasicEmotionId;
   hierarchyConfirmedBasicId?: BasicEmotionId | null;
+  hierarchyScreenAnchor?: { x: number; y: number };
   onHierarchyFrontBasicChange?: (id: BasicEmotionId) => void;
   flowLabelExpiresAt?: Readonly<Record<string, number>>;
   flowLabelNow?: number;
@@ -130,6 +132,7 @@ interface CameraControlsProps {
   spaceOverview?: boolean;
   spaceOverviewFocusId?: EmotionId | null;
   hierarchyBrowse?: boolean;
+  hierarchyScreenAnchor?: { x: number; y: number };
   onCameraStateChange?: (state: Pick<MinimapSyncState, 'cameraPosition' | 'cameraTarget' | 'cameraUp'>) => void;
 }
 
@@ -156,6 +159,7 @@ function CameraControls({
   spaceOverview = false,
   spaceOverviewFocusId = null,
   hierarchyBrowse = false,
+  hierarchyScreenAnchor = HIERARCHY_SCREEN_ANCHOR,
   onCameraStateChange,
 }: CameraControlsProps) {
   const { camera, gl, size } = useThree();
@@ -169,7 +173,12 @@ function CameraControls({
   const cameraRight = useRef(new THREE.Vector3());
   const rotationAxis = useRef(new THREE.Vector3());
   const rotationQuaternion = useRef(new THREE.Quaternion());
-  const dragState = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const dragState = useRef<{
+    pointerId: number;
+    x: number;
+    y: number;
+    mode: 'orbit' | 'pan';
+  } | null>(null);
   const focusPhase = useRef<FocusPhase>('idle');
   const prevFocusOnSelection = useRef(focusOnSelection);
   const frameCounter = useRef(0);
@@ -183,6 +192,12 @@ function CameraControls({
   const alignLateral = useRef(new THREE.Vector3());
   const alignScreen = useRef(new THREE.Vector3());
   const alignViewForward = useRef(new THREE.Vector3());
+  const hierarchyCamUp = useRef(new THREE.Vector3(0, 1, 0));
+  const hierarchyScreenAnchorRef = useRef({ ...hierarchyScreenAnchor });
+
+  useEffect(() => {
+    hierarchyScreenAnchorRef.current = { ...hierarchyScreenAnchor };
+  }, [hierarchyScreenAnchor]);
 
   const focusDistance = explorationFocus ? explorationDistance : SELECTION_CAMERA_DISTANCE;
   const screenAnchor = explorationFocus ? explorationAnchor : undefined;
@@ -296,14 +311,40 @@ function CameraControls({
     camera.lookAt(target);
   };
 
+  const panCameraTarget = (deltaX: number, deltaY: number) => {
+    const target = smoothTarget.current;
+    if (cameraOffsetDirection.current.lengthSq() < 0.0001) {
+      cameraOffsetDirection.current.copy(camera.position).sub(target);
+    }
+    cameraRight.current.setFromMatrixColumn(camera.matrix, 0).normalize();
+    hierarchyCamUp.current.setFromMatrixColumn(camera.matrix, 1).normalize();
+    const panScale = Math.max(0.004, cameraOffsetDirection.current.length() * 0.0018);
+    target.addScaledVector(cameraRight.current, -deltaX * panScale);
+    target.addScaledVector(hierarchyCamUp.current, deltaY * panScale);
+    baseTarget.current.copy(target);
+    desiredTarget.current.copy(target);
+    camera.position.copy(target).add(cameraOffsetDirection.current);
+    camera.lookAt(target);
+  };
+
   useEffect(() => {
     const element = gl.domElement;
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!enableRotate || event.button !== 0) return;
+      if (!enableRotate) return;
       if (interactionLockRef?.current) return;
-      dragState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      const pan = event.shiftKey || event.button === 1 || event.button === 2;
+      if (!pan && event.button !== 0) return;
+      dragState.current = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        mode: pan ? 'pan' : 'orbit',
+      };
       element.setPointerCapture(event.pointerId);
+      if (pan) {
+        event.preventDefault();
+      }
     };
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -312,8 +353,17 @@ function CameraControls({
 
       const deltaX = event.clientX - drag.x;
       const deltaY = event.clientY - drag.y;
-      dragState.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-      rotateCameraAroundTarget(deltaX, deltaY);
+      dragState.current = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        mode: drag.mode,
+      };
+      if (drag.mode === 'pan') {
+        panCameraTarget(deltaX, deltaY);
+      } else {
+        rotateCameraAroundTarget(deltaX, deltaY);
+      }
     };
 
     const handlePointerUp = (event: PointerEvent) => {
@@ -343,11 +393,30 @@ function CameraControls({
       camera.lookAt(target);
     };
 
+    const handleContextMenu = (event: Event) => {
+      if (hierarchyBrowse) {
+        event.preventDefault();
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!hierarchyBrowse || !(camera instanceof THREE.PerspectiveCamera)) {
+        return;
+      }
+      if (event.key === '[' || event.key === ']') {
+        const delta = event.key === ']' ? 2 : -2;
+        camera.fov = THREE.MathUtils.clamp(camera.fov + delta, 20, 140);
+        camera.updateProjectionMatrix();
+      }
+    };
+
     element.addEventListener('pointerdown', handlePointerDown);
     element.addEventListener('pointermove', handlePointerMove);
     element.addEventListener('pointerup', handlePointerUp);
     element.addEventListener('pointercancel', handlePointerUp);
     element.addEventListener('wheel', handleWheel, { passive: false });
+    element.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       element.removeEventListener('pointerdown', handlePointerDown);
@@ -355,8 +424,10 @@ function CameraControls({
       element.removeEventListener('pointerup', handlePointerUp);
       element.removeEventListener('pointercancel', handlePointerUp);
       element.removeEventListener('wheel', handleWheel);
+      element.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [camera, gl, enableRotate, enableZoom, interactionLockRef]);
+  }, [camera, gl, enableRotate, enableZoom, hierarchyBrowse, interactionLockRef]);
 
   useFrame((state, delta) => {
     if (hierarchyBrowse) {
@@ -365,12 +436,19 @@ function CameraControls({
       smoothTarget.current.set(...HIERARCHY_CAMERA_TARGET);
       desiredTarget.current.set(...HIERARCHY_CAMERA_TARGET);
       baseTarget.current.set(...HIERARCHY_CAMERA_TARGET);
+      cameraOffsetDirection.current.copy(camera.position).sub(smoothTarget.current);
       if (camera instanceof THREE.PerspectiveCamera) {
-        if (camera.fov !== HIERARCHY_CAMERA_FOV) {
-          camera.fov = HIERARCHY_CAMERA_FOV;
-          camera.updateProjectionMatrix();
+        camera.fov = HIERARCHY_CAMERA_FOV;
+        if (size.width > 0 && size.height > 0) {
+          applySelectionViewOffset(
+            camera,
+            size.width,
+            size.height,
+            1,
+            hierarchyScreenAnchorRef.current,
+          );
         }
-        clearSelectionViewOffset(camera);
+        camera.updateProjectionMatrix();
       }
       camera.lookAt(smoothTarget.current);
       return;
@@ -535,7 +613,17 @@ function CameraControls({
     camera.up.set(0, 1, 0);
     if (camera instanceof THREE.PerspectiveCamera) {
       camera.fov = resetFov;
-      clearSelectionViewOffset(camera);
+      if (hierarchyBrowse) {
+        applySelectionViewOffset(
+          camera,
+          size.width,
+          size.height,
+          1,
+          hierarchyScreenAnchorRef.current,
+        );
+      } else {
+        clearSelectionViewOffset(camera);
+      }
       camera.updateProjectionMatrix();
     }
 
@@ -548,7 +636,7 @@ function CameraControls({
     zoomProgress.current = 0;
     setFocusPhase('idle');
     prevFocusOnSelection.current = false;
-  }, [resetCount, camera, spaceOverview, spaceOverviewFocusId, hierarchyBrowse]);
+  }, [resetCount, camera, spaceOverview, spaceOverviewFocusId, hierarchyBrowse, size.height, size.width]);
 
   return null;
 }
@@ -716,6 +804,7 @@ export function SpaceCanvas({
   hierarchyBrowse = false,
   hierarchyFrontBasicId = 'fear',
   hierarchyConfirmedBasicId = null,
+  hierarchyScreenAnchor = HIERARCHY_SCREEN_ANCHOR,
   onHierarchyFrontBasicChange,
   flowLabelExpiresAt,
   flowLabelNow = 0,
@@ -1073,6 +1162,7 @@ export function SpaceCanvas({
           spaceOverview={spaceOverview}
           spaceOverviewFocusId={spaceOverviewFocusId}
           hierarchyBrowse={hierarchyBrowse}
+          hierarchyScreenAnchor={hierarchyScreenAnchor}
           onCameraStateChange={handleCameraStateChange}
         />
         <MinimapFocusTracker

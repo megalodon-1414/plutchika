@@ -16,13 +16,13 @@ export function applySelectionViewOffset(
 ): void {
   const clamped = Math.min(1, Math.max(0, progress));
 
-  if (clamped <= 0) {
+  if (clamped <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
     clearSelectionViewOffset(camera);
     return;
   }
 
-  const offsetX = Math.round((0.5 - anchor.x) * viewportWidth * clamped);
-  const offsetY = Math.round((anchor.y - 0.5) * viewportHeight * clamped);
+  const offsetX = (0.5 - anchor.x) * viewportWidth * clamped;
+  const offsetY = (anchor.y - 0.5) * viewportHeight * clamped;
 
   camera.setViewOffset(
     viewportWidth,
@@ -32,6 +32,7 @@ export function applySelectionViewOffset(
     viewportWidth,
     viewportHeight,
   );
+  camera.updateProjectionMatrix();
 }
 
 export function clearSelectionViewOffset(camera: THREE.PerspectiveCamera): void {
