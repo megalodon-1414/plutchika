@@ -30,7 +30,7 @@ import { resolvePrimaryEmotionLabel } from './utils/emotionCoordinates';
 import { filterPlotsByTags, getPlotKindLabel, type PlotTagId } from './utils/plotTags';
 import { mergeWithSeedPlots } from './utils/seedPlots';
 import type { BasicEmotionId, EmotionId } from './data/emotions';
-import { getBasicEmotion } from './data/emotions';
+import { getBasicEmotion, getEmotionById } from './data/emotions';
 import {
   SEARCH_GAME_MIN_REFERENCE_HOPS,
   SEARCH_GAME_UNREACHABLE_DISTANCE,
@@ -74,6 +74,8 @@ function App() {
   const [hierarchyBrowseMode] = useState(true);
   const [hierarchyFrontBasicId, setHierarchyFrontBasicId] = useState<BasicEmotionId>('fear');
   const [hierarchyConfirmedBasicId, setHierarchyConfirmedBasicId] = useState<BasicEmotionId | null>(null);
+  const [hierarchyFrontDyadId, setHierarchyFrontDyadId] = useState<EmotionId | null>(null);
+  const [hierarchyConfirmedDyadId, setHierarchyConfirmedDyadId] = useState<EmotionId | null>(null);
   const [spaceOverview, setSpaceOverview] = useState(false);
   const [spaceOverviewFocusId, setSpaceOverviewFocusId] = useState<EmotionId | null>(null);
   const [overviewHoveredEmotionId, setOverviewHoveredEmotionId] = useState<EmotionId | null>(null);
@@ -521,6 +523,23 @@ function App() {
     setOverviewHoveredEmotionId(emotionId);
   }, []);
 
+  const handleHierarchyFrontBasicChange = useCallback((id: BasicEmotionId) => {
+    setHierarchyFrontBasicId(id);
+    setHierarchyConfirmedBasicId((prev) => {
+      if (prev && prev !== id) {
+        setHierarchyConfirmedDyadId(null);
+        setHierarchyFrontDyadId(null);
+        return null;
+      }
+      return prev;
+    });
+  }, []);
+
+  const handleHierarchyFrontDyadChange = useCallback((id: EmotionId) => {
+    setHierarchyFrontDyadId(id);
+    setHierarchyConfirmedDyadId((prev) => (prev && prev !== id ? null : prev));
+  }, []);
+
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setFlowLabelNow(Date.now());
@@ -794,12 +813,10 @@ function App() {
           hierarchyBrowse={hierarchyBrowseMode}
           hierarchyFrontBasicId={hierarchyFrontBasicId}
           hierarchyConfirmedBasicId={hierarchyConfirmedBasicId}
-          onHierarchyFrontBasicChange={(id) => {
-            setHierarchyFrontBasicId(id);
-            if (hierarchyConfirmedBasicId && hierarchyConfirmedBasicId !== id) {
-              setHierarchyConfirmedBasicId(null);
-            }
-          }}
+          hierarchyFrontDyadId={hierarchyFrontDyadId}
+          hierarchyConfirmedDyadId={hierarchyConfirmedDyadId}
+          onHierarchyFrontBasicChange={handleHierarchyFrontBasicChange}
+          onHierarchyFrontDyadChange={handleHierarchyFrontDyadChange}
           flowLabelExpiresAt={flowLabelExpiresAt}
           flowLabelNow={flowLabelNow}
           plotLabelDisplayMode={plotLabelDisplayMode}
@@ -844,15 +861,17 @@ function App() {
                 textAlign: 'center',
               }}
             >
-              {hierarchyConfirmedBasicId
-                ? `${getBasicEmotion(hierarchyConfirmedBasicId).label} の合成感情 · 押すと手前へ`
-                : `手前: ${getBasicEmotion(hierarchyFrontBasicId).label} · ほかを押すと回転`}
+              {hierarchyConfirmedDyadId
+                ? `${getEmotionById(hierarchyConfirmedDyadId).label} の単語 · 押すと手前へ`
+                : hierarchyConfirmedBasicId
+                  ? `${getBasicEmotion(hierarchyConfirmedBasicId).label} の合成感情 · 押すと手前へ`
+                  : `手前: ${getBasicEmotion(hierarchyFrontBasicId).label} · ほかを押すと回転`}
             </div>
             <div style={{ display: 'flex', gap: '10px', pointerEvents: 'auto' }}>
-              {hierarchyConfirmedBasicId ? (
+              {hierarchyConfirmedDyadId ? (
                 <button
                   type="button"
-                  onClick={() => setHierarchyConfirmedBasicId(null)}
+                  onClick={() => setHierarchyConfirmedDyadId(null)}
                   style={{
                     padding: '12px 22px',
                     borderRadius: '999px',
@@ -868,6 +887,59 @@ function App() {
                 >
                   戻る
                 </button>
+              ) : hierarchyConfirmedBasicId ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHierarchyConfirmedBasicId(null);
+                      setHierarchyFrontDyadId(null);
+                    }}
+                    style={{
+                      padding: '12px 22px',
+                      borderRadius: '999px',
+                      border: `1px solid ${emotionUiTheme.controlBorder}`,
+                      backgroundColor: emotionUiTheme.controlBackground,
+                      color: emotionUiTheme.controlText,
+                      fontSize: '0.9rem',
+                      letterSpacing: '0.1em',
+                      cursor: 'pointer',
+                      backdropFilter: 'blur(10px)',
+                      transition: UI_COLOR_TRANSITION,
+                    }}
+                  >
+                    戻る
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!hierarchyFrontDyadId}
+                    onClick={() => {
+                      if (!hierarchyFrontDyadId) {
+                        return;
+                      }
+                      setHierarchyConfirmedDyadId(hierarchyFrontDyadId);
+                    }}
+                    style={{
+                      padding: '12px 28px',
+                      borderRadius: '999px',
+                      border: `1px solid ${emotionUiTheme.accentBorderStrong}`,
+                      backgroundColor: emotionUiTheme.panelBackground,
+                      color: emotionUiTheme.textPrimary,
+                      fontSize: '0.95rem',
+                      letterSpacing: '0.14em',
+                      fontWeight: 700,
+                      cursor: hierarchyFrontDyadId ? 'pointer' : 'default',
+                      opacity: hierarchyFrontDyadId ? 1 : 0.5,
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: `0 0 0 1px ${emotionUiTheme.accentBorder}, 0 8px 24px rgba(0,0,0,0.35)`,
+                      transition: UI_COLOR_TRANSITION,
+                    }}
+                  >
+                    決定 · {hierarchyFrontDyadId
+                      ? getEmotionById(hierarchyFrontDyadId).label
+                      : '合成感情'}
+                  </button>
+                </>
               ) : (
                 <button
                   type="button"

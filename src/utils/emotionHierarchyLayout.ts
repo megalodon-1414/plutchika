@@ -28,6 +28,17 @@ export const HIERARCHY_CONFIRMED_AXIS_HEIGHT = 3.15;
 export const HIERARCHY_CONFIRMED_BASIC_SCALE = 0.72;
 export const HIERARCHY_CONFIRMED_MOVE_LERP = 5.2;
 export const HIERARCHY_CHILD_SPHERE_RADIUS = 0.48;
+/** 決定後: 選んだ合成感情は軸上（基本感情より手前側）、単語は同じ円上 */
+export const HIERARCHY_CONFIRMED_DYAD_AXIS_HEIGHT = 1.65;
+export const HIERARCHY_CONFIRMED_DYAD_SCALE = 0.88;
+export const HIERARCHY_WORD_SPHERE_RADIUS = 0.4;
+/** 合成感情リング導入: 主感情到達後に軸上で生成→下降→回転しながら円へ展開 */
+export const HIERARCHY_DYAD_DESCEND_LERP = 4.4;
+export const HIERARCHY_DYAD_UNFOLD_LERP = 3.6;
+/** 展開中に軸まわりへ回す周回数 */
+export const HIERARCHY_DYAD_UNFOLD_SPINS = 1.7;
+/** 展開後、手前強調サイズへ寄せる速さ */
+export const HIERARCHY_DYAD_SIZE_EMPHASIS_LERP = 4.8;
 
 /** 旧レイアウト互換（親直下リング用） */
 export const HIERARCHY_CHILD_RING_RADIUS = 2.35;
@@ -142,6 +153,30 @@ export function getHierarchySpinForAngle(angleRad: number): number {
 /** 決定後に基本感情が座る軸上ローカル座標 */
 export function getConfirmedBasicAxisLocal(): Vec3 {
   return { x: 0, y: HIERARCHY_CONFIRMED_AXIS_HEIGHT, z: 0 };
+}
+
+/** 決定後に合成感情が座る軸上ローカル座標（基本感情との間） */
+export function getConfirmedDyadAxisLocal(): Vec3 {
+  return { x: 0, y: HIERARCHY_CONFIRMED_DYAD_AXIS_HEIGHT, z: 0 };
+}
+
+/** 決定後の単語リング（8感情・合成感情と同じ円） */
+export function getHierarchyWordRingPositions(count: number): Array<{
+  angleRad: number;
+  position: Vec3;
+}> {
+  const n = Math.max(count, 1);
+  return Array.from({ length: count }, (_, index) => {
+    const angleRad = (index / n) * Math.PI * 2 - Math.PI / 2;
+    return {
+      angleRad,
+      position: {
+        x: HIERARCHY_BASIC_RING_RADIUS * Math.cos(angleRad),
+        y: HIERARCHY_BASIC_Y,
+        z: HIERARCHY_BASIC_RING_RADIUS * Math.sin(angleRad),
+      },
+    };
+  });
 }
 
 export function getHierarchyCameraDebugFromLive(

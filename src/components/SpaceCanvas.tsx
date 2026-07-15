@@ -93,8 +93,11 @@ interface SpaceCanvasProps {
   hierarchyBrowse?: boolean;
   hierarchyFrontBasicId?: BasicEmotionId;
   hierarchyConfirmedBasicId?: BasicEmotionId | null;
+  hierarchyFrontDyadId?: EmotionId | null;
+  hierarchyConfirmedDyadId?: EmotionId | null;
   hierarchyScreenAnchor?: { x: number; y: number };
   onHierarchyFrontBasicChange?: (id: BasicEmotionId) => void;
+  onHierarchyFrontDyadChange?: (id: EmotionId) => void;
   flowLabelExpiresAt?: Readonly<Record<string, number>>;
   flowLabelNow?: number;
   plotLabelDisplayMode?: PlotLabelDisplayMode;
@@ -804,8 +807,11 @@ export function SpaceCanvas({
   hierarchyBrowse = false,
   hierarchyFrontBasicId = 'fear',
   hierarchyConfirmedBasicId = null,
+  hierarchyFrontDyadId = null,
+  hierarchyConfirmedDyadId = null,
   hierarchyScreenAnchor = HIERARCHY_SCREEN_ANCHOR,
   onHierarchyFrontBasicChange,
+  onHierarchyFrontDyadChange,
   flowLabelExpiresAt,
   flowLabelNow = 0,
   plotLabelDisplayMode = 'flow',
@@ -1202,7 +1208,11 @@ export function SpaceCanvas({
             <EmotionHierarchyBrowse
               frontBasicId={hierarchyFrontBasicId}
               confirmedBasicId={hierarchyConfirmedBasicId}
+              frontDyadId={hierarchyFrontDyadId}
+              confirmedDyadId={hierarchyConfirmedDyadId}
+              plots={plots}
               onFrontBasicChange={onHierarchyFrontBasicChange}
+              onFrontDyadChange={onHierarchyFrontDyadChange}
             />
           )}
           {!hierarchyBrowse && spaceOverview && (
