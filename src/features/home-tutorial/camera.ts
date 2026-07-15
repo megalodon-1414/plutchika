@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { HomeTutorialStepDefinition } from './constants';
-import { getStepWorldPosition } from './responsive';
 
 const DEFAULT_CAMERA_DISTANCE = 5;
 
@@ -44,10 +43,7 @@ export function getHomeTutorialCameraPose(
   step: HomeTutorialStepDefinition,
   viewportWidth?: number,
 ): HomeTutorialCameraPose {
-  const resolvedPosition = viewportWidth != null
-    ? getStepWorldPosition(step.id, step.worldPosition, viewportWidth)
-    : step.worldPosition;
-  const lookAt = new THREE.Vector3(...resolvedPosition);
+  const lookAt = new THREE.Vector3(...step.worldPosition);
   const baseDistance = step.cameraDistance ?? DEFAULT_CAMERA_DISTANCE;
   const distance = viewportWidth != null
     ? getHomeTutorialCameraDistance(viewportWidth, baseDistance)

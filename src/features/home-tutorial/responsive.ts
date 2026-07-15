@@ -44,6 +44,11 @@ export function getResponsiveScreenAnchor(
         x: viewportMix(viewportWidth, fallback.x, 0.22),
         y: viewportMix(viewportWidth, fallback.y, 0.5),
       };
+    case 'emotion-petals':
+      return {
+        x: viewportMix(viewportWidth, fallback.x, 0.5),
+        y: viewportMix(viewportWidth, fallback.y, 0.5),
+      };
     default:
       return fallback;
   }
@@ -59,18 +64,6 @@ export function getIntroPanelLayoutMode(
     return 'narrow';
   }
   return 'wide';
-}
-
-/** スマホ時のみステップごとの worldPosition 上書き */
-export function getStepWorldPosition(
-  stepId: string,
-  worldPosition: readonly [number, number, number],
-  viewportWidth: number,
-): [number, number, number] {
-  if (viewportWidth < 640 && stepId === 'emotion-wheel') {
-    return [worldPosition[0], worldPosition[1], -0.2];
-  }
-  return [...worldPosition];
 }
 
 export interface IntroPanelResponsiveLayout {

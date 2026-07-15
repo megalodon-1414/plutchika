@@ -6,7 +6,7 @@
  * camera.ts         … ステップごとのカメラ姿勢
  * HomeTutorialView  … ページ本体（2D UI + ステップ遷移）
  * HomeTutorialCanvas … Three.js シーン
- * HomeTutorial*Panel … STEP1/2 の縦書き UI
+ * HomeTutorial*Panel … STEP1/2 の横書きイントロ UI
  */
 
 export { HomeTutorialView } from './HomeTutorialView';

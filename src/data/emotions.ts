@@ -87,3 +87,20 @@ export function getEmotionById(id: EmotionId): BasicEmotion | DyadEmotion {
 export function getDyadsContainingBasic(basicId: BasicEmotionId): DyadEmotion[] {
   return DYAD_EMOTIONS.filter((dyad) => dyad.components.includes(basicId));
 }
+
+/** 2つの基本感情から合成感情を探す（順序不問）。対立ペアなどは null */
+export function findDyadByComponents(
+  a: BasicEmotionId,
+  b: BasicEmotionId,
+): DyadEmotion | null {
+  if (a === b) {
+    return null;
+  }
+  return (
+    DYAD_EMOTIONS.find(
+      (dyad) =>
+        (dyad.components[0] === a && dyad.components[1] === b) ||
+        (dyad.components[0] === b && dyad.components[1] === a),
+    ) ?? null
+  );
+}

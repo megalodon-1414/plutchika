@@ -27,6 +27,17 @@ interface HomeTutorialIntroPanelProps {
   visible: boolean;
   viewportWidth: number;
   tune?: HomeTutorialIntroPanelTune;
+  /** 左下装飾ブロックの文字色（合成感情など） */
+  welcomeColor?: string;
+  /** true で本文を右揃え（STEP3 など） */
+  bodyAlignRight?: boolean;
+  /**
+   * STEP3 スマホ専用: キャッチ非表示、見出しを球直下固定、body を右下固定
+   * （body の出し入れで見出し位置が動かない）
+   */
+  step3MobilePinned?: boolean;
+  /** 球の画面座標（step3MobilePinned 時の見出し位置に使用） */
+  sphereScreenPoint?: { x: number; y: number } | null;
 }
 
 function rem(value: number, scale: number): string {
@@ -125,7 +136,7 @@ function MomochidoriFitCell({
   fontSize: string;
   wght: number;
   color: string;
-  align: 'left' | 'right';
+  align: 'left' | 'right' | 'center';
   valign?: 'top' | 'bottom';
   wdthMin: number;
   wdthMax: number;
@@ -190,7 +201,8 @@ function MomochidoriFitCell({
         height: cellHeight,
         display: 'flex',
         alignItems: valign === 'top' ? 'flex-start' : 'flex-end',
-        justifyContent: align === 'right' ? 'flex-end' : 'flex-start',
+        justifyContent:
+          align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
         overflow: clipOverflow ? 'hidden' : 'visible',
         flexShrink: 0,
         paddingLeft: paddingLeftPx,
@@ -232,7 +244,7 @@ function MomochidoriFitStack({
   block: FitStackBlock;
   uiScale: number;
   color: string;
-  align: 'left' | 'right';
+  align: 'left' | 'right' | 'center';
   paddingLeftPx?: number;
   clipOverflow?: boolean;
   cellWidthRemOverride?: number;
@@ -244,6 +256,8 @@ function MomochidoriFitStack({
         flexDirection: 'column',
         gap: `${Math.round(block.gapPx * uiScale)}px`,
         marginLeft: align === 'right' ? 'auto' : undefined,
+        marginRight: align === 'center' ? 'auto' : undefined,
+        alignItems: align === 'center' ? 'center' : undefined,
         flexShrink: 0,
       }}
     >
@@ -341,6 +355,7 @@ function BodyBlock({
   textAlign,
   paddingTopPx,
   width,
+  fontScale = 1,
 }: {
   paragraphs: readonly string[];
   tune: HomeTutorialIntroPanelTune['body'];
@@ -352,6 +367,8 @@ function BodyBlock({
   textAlign?: 'left' | 'right';
   paddingTopPx?: number;
   width?: string;
+  /** 本文フォントだけ追加拡縮（スマホレイアウト用） */
+  fontScale?: number;
 }) {
   return (
     <div
@@ -377,7 +394,7 @@ function BodyBlock({
           key={paragraph}
           style={momochidoriStyle(tune.wght, tune.wdth, {
             margin: 0,
-            fontSize: rem(tune.fontSizeRem, displayScale),
+            fontSize: rem(tune.fontSizeRem, displayScale * fontScale),
             lineHeight: tune.lineHeight,
             letterSpacing: tune.letterSpacing,
             color,
@@ -397,13 +414,30 @@ export function HomeTutorialIntroPanel({
   visible,
   viewportWidth,
   tune = HOME_TUTORIAL_INTRO_PANEL_TUNE,
+  welcomeColor,
+  bodyAlignRight = false,
+  step3MobilePinned = false,
+  sphereScreenPoint = null,
 }: HomeTutorialIntroPanelProps) {
   const uiScale = panel.width / INTRO_PANEL_BASE_WIDTH;
   const accent = uiTheme.accent;
+  const decorColor = welcomeColor ?? accent;
   const bodyAccent = uiTheme.accentMuted;
   const responsive = getIntroPanelResponsiveLayout(viewportWidth, panel.width);
   const displayScale = uiScale * responsive.contentScale;
   const isNarrow = responsive.mode === 'narrow';
+  const useStep3Mobile = step3MobilePinned && isNarrow;
+  const bodyMarginLeft = bodyAlignRight || useStep3Mobile ? 'auto' : responsive.bodyMarginLeft;
+  const bodyMaxWidth =
+    bodyAlignRight || useStep3Mobile
+      ? responsive.mode === 'narrow'
+        ? '72%'
+        : '53%'
+      : responsive.bodyMaxWidth;
+  const bodyTextAlign =
+    bodyAlignRight || useStep3Mobile ? 'right' : responsive.bodyTextAlign;
+  const bodyAlignSelf =
+    bodyAlignRight || useStep3Mobile ? 'flex-end' : responsive.bodyAlignSelf;
 
   const catchphraseBoxWidthRem = capRemToPanelWidth(
     tune.catchphrase.boxWidthRem,
@@ -491,6 +525,92 @@ export function HomeTutorialIntroPanel({
         }}
       >
         {isNarrow ? (
+          useStep3Mobile ? (
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                height: '100%',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                }}
+              >
+                <MomochidoriFitStack
+                  lines={brandLines}
+                  block={tune.brand}
+                  uiScale={displayScale}
+                  color={accent}
+                  align="right"
+                  cellWidthRemOverride={brandCellWidthRem}
+                />
+              </div>
+
+              <div
+                style={{
+                  position: 'absolute',
+                  left: sphereScreenPoint
+                    ? `${sphereScreenPoint.x - panel.x - Math.round(14 * displayScale)}px`
+                    : '48%',
+                  top: sphereScreenPoint
+                    ? `${sphereScreenPoint.y - panel.y + Math.round(300 * displayScale)}px`
+                    : '86%',
+                  transform: 'translateX(-50%)',
+                  pointerEvents: 'none',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {welcomeDecorLines.map((line) => (
+                  <p
+                    key={line}
+                    style={momochidoriStyle(tune.welcome.wght, 100, {
+                      margin: 0,
+                      fontSize: rem(
+                        (tune.welcome.lines?.[0]?.fontSizeRem ?? tune.welcome.fontSizeRem) * 1.22,
+                        displayScale,
+                      ),
+                      lineHeight: 1.25,
+                      letterSpacing: '0.06em',
+                      color: decorColor,
+                      textAlign: 'center',
+                    })}
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
+
+              {bodyParagraphs.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    bottom: `${Math.round(52 * displayScale)}px`,
+                    width: bodyMaxWidth,
+                    maxWidth: '100%',
+                  }}
+                >
+                  <BodyBlock
+                    paragraphs={bodyParagraphs}
+                    tune={tune.body}
+                    displayScale={displayScale}
+                    color={bodyAccent}
+                    marginLeft="0"
+                    maxWidth="100%"
+                    alignSelf="stretch"
+                    textAlign="right"
+                    width="100%"
+                    fontScale={1.2}
+                  />
+                </div>
+              )}
+            </div>
+          ) : (
           <div
             style={{
               display: 'flex',
@@ -522,28 +642,27 @@ export function HomeTutorialIntroPanel({
               tune={tune.body}
               displayScale={displayScale}
               color={bodyAccent}
-              marginLeft={responsive.bodyMarginLeft}
-              maxWidth={responsive.bodyMaxWidth}
-              alignSelf={responsive.bodyAlignSelf}
-              textAlign={responsive.bodyTextAlign}
-              width={
-                responsive.bodyAlignSelf === 'flex-end'
-                  ? responsive.bodyMaxWidth
-                  : '100%'
-              }
+              marginLeft={bodyMarginLeft}
+              maxWidth={bodyMaxWidth}
+              alignSelf={bodyAlignSelf}
+              textAlign={bodyTextAlign}
+              width={bodyAlignSelf === 'flex-end' ? bodyMaxWidth : '100%'}
+              fontScale={1.2}
             />
 
-            <MomochidoriFitStack
-              lines={welcomeDecorLines}
-              block={tune.welcome}
-              uiScale={displayScale}
-              color={accent}
-              align="left"
-              paddingLeftPx={welcomePaddingLeftPx}
-              clipOverflow={tune.welcome.clipOverflow}
-              cellWidthRemOverride={welcomeCellWidthRem}
-            />
+            <div style={{ alignSelf: 'flex-end' }}>
+              <MomochidoriFitStack
+                lines={welcomeDecorLines}
+                block={tune.welcome}
+                uiScale={displayScale}
+                color={decorColor}
+                align="right"
+                clipOverflow={tune.welcome.clipOverflow}
+                cellWidthRemOverride={welcomeCellWidthRem}
+              />
+            </div>
           </div>
+          )
         ) : (
           <>
             <div
@@ -589,7 +708,7 @@ export function HomeTutorialIntroPanel({
                   top: tune.layout.glowTop,
                   width: tune.layout.glowWidth,
                   height: tune.layout.glowHeight,
-                  background: `radial-gradient(ellipse at 20% 50%, ${accent}40 0%, transparent 72%)`,
+                  background: `radial-gradient(ellipse at 20% 50%, ${decorColor}40 0%, transparent 72%)`,
                   filter: `blur(${Math.round(tune.layout.glowBlurPx * displayScale)}px)`,
                   pointerEvents: 'none',
                 }}
@@ -606,7 +725,7 @@ export function HomeTutorialIntroPanel({
                   lines={welcomeDecorLines}
                   block={tune.welcome}
                   uiScale={displayScale}
-                  color={accent}
+                  color={decorColor}
                   align="left"
                   paddingLeftPx={welcomePaddingLeftPx}
                   clipOverflow={tune.welcome.clipOverflow}
@@ -619,8 +738,9 @@ export function HomeTutorialIntroPanel({
                 tune={tune.body}
                 displayScale={displayScale}
                 color={bodyAccent}
-                marginLeft={responsive.bodyMarginLeft}
-                maxWidth={responsive.bodyMaxWidth}
+                marginLeft={bodyMarginLeft}
+                maxWidth={bodyMaxWidth}
+                textAlign={bodyTextAlign}
                 paddingTopPx={tune.body.paddingTopPx}
               />
             </div>

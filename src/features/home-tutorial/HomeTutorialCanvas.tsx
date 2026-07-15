@@ -12,10 +12,12 @@ import {
   HOME_TUTORIAL_SPHERE_RADIUS,
   HOME_TUTORIAL_STEPS,
 } from './constants';
-import { getResponsiveScreenAnchor, getStepWorldPosition } from './responsive';
+import { getResponsiveScreenAnchor } from './responsive';
 import { HomeTutorialPlutchikWheel3D } from './HomeTutorialPlutchikWheel3D';
+import { HomeTutorialStepPetals3D } from './HomeTutorialStepPetals3D';
 import { HomeTutorialVoidCloud } from './HomeTutorialVoidCloud';
 import { OrbitingStepLabel, StepGuideParticles } from './HomeTutorialStepGuides';
+import type { BasicEmotionId } from '../../data/emotions';
 
 const CAMERA_FOV = 55;
 const CAMERA_POS_LERP_SPEED = 3.4;
@@ -27,6 +29,11 @@ export type HomeLandingIntroPhase = 'pending' | 'moving' | 'done';
 interface HomeTutorialCanvasProps {
   activeStepIndex: number;
   landingIntroPhase?: HomeLandingIntroPhase;
+  selectedEmotionIds?: readonly BasicEmotionId[];
+  selectionLabel?: string;
+  /** false で球直下の 3D/Html 感情ラベルを隠す（スマホ STEP3 など） */
+  showSelectionLabel?: boolean;
+  onEmotionToggle?: (id: BasicEmotionId) => void;
   onActiveSphereScreenPosition?: (point: { x: number; y: number; visible: boolean } | null) => void;
   onStepSelect?: (index: number) => void;
   onReady?: () => void;
@@ -182,7 +189,7 @@ function TutorialStepSphere({
   const lastPoint = useRef<{ x: number; y: number; visible: boolean } | null>(null);
   const frameCounter = useRef(0);
   const step = HOME_TUTORIAL_STEPS[stepIndex];
-  const worldPosition = getStepWorldPosition(step.id, step.worldPosition, size.width);
+  const worldPosition = step.worldPosition;
   const isActive = stepIndex === activeStepIndex;
   const isClickable = !isActive;
   const inactiveScale = 0.9;
@@ -274,6 +281,10 @@ function TutorialStepSphere({
 export function HomeTutorialCanvas({
   activeStepIndex,
   landingIntroPhase = 'done',
+  selectedEmotionIds = [],
+  selectionLabel = '紡錘を選ぶ',
+  showSelectionLabel = true,
+  onEmotionToggle,
   onActiveSphereScreenPosition,
   onStepSelect,
   onReady,
@@ -282,6 +293,9 @@ export function HomeTutorialCanvas({
   const initialPose = getHomeTutorialCameraPose(HOME_TUTORIAL_STEPS[0], initialViewportWidth);
   const activeStep = HOME_TUTORIAL_STEPS[activeStepIndex] ?? HOME_TUTORIAL_STEPS[0];
   const mainStep = HOME_TUTORIAL_STEPS[0];
+  const petalsStepIndex = HOME_TUTORIAL_STEPS.findIndex((step) => step.id === 'emotion-petals');
+  const petalsStep = petalsStepIndex >= 0 ? HOME_TUTORIAL_STEPS[petalsStepIndex] : null;
+  const isPetalsStepActive = activeStepIndex === petalsStepIndex;
   const showPlutchikWheel = activeStepIndex === 0;
   const nextStep = HOME_TUTORIAL_STEPS[activeStepIndex + 1];
   const previousStep = HOME_TUTORIAL_STEPS[activeStepIndex - 1];
@@ -305,6 +319,17 @@ export function HomeTutorialCanvas({
         center={mainStep.worldPosition}
         visible={showPlutchikWheel}
       />
+      {petalsStep && (
+        <HomeTutorialStepPetals3D
+          center={petalsStep.worldPosition}
+          expanded={isPetalsStepActive}
+          interactive={isPetalsStepActive}
+          selectedIds={isPetalsStepActive ? selectedEmotionIds : []}
+          selectionLabel={selectionLabel}
+          showSelectionLabel={showSelectionLabel}
+          onToggleSelect={onEmotionToggle}
+        />
+      )}
       {nextStep && (
         <>
           <OrbitingStepLabel
