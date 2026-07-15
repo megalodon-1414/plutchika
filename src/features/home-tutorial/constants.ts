@@ -152,14 +152,11 @@ export interface HomeTutorialIntroPanelTune {
     wght: number;
     wdth: number;
     gapPx: number;
-    marginLeft: string;
-    maxWidth: string;
     paddingTopPx: number;
   };
   layout: {
     rootMinHeightRem: number;
     headerRowGapPx: number;
-    lowerSectionMarginTopPx: number;
     lowerMinHeightRem: number;
     glowLeft: string;
     glowTop: string;
@@ -211,7 +208,7 @@ export const HOME_TUTORIAL_INTRO_PANEL_TUNE: HomeTutorialIntroPanelTune = {
     ],
   },
   welcome: {
-    // ── 3行共通のデフォルト（lines で未指定の行だけに効く）──
+    // 行未指定時のフォールバック（実値は lines 側）
     cellWidthRem: 10.8,
     cellHeightRem: 2.85,
     fontSizeRem: 2.45,
@@ -221,21 +218,11 @@ export const HOME_TUTORIAL_INTRO_PANEL_TUNE: HomeTutorialIntroPanelTune = {
     autoFillWidth: true,
     gapPx: 0,
     valign: 'bottom',
-
-    // ── ブロック全体の位置 ──
     leftRem: 0.45,
     bottomRem: 0,
     paddingLeftRem: 0.12,
     clipOverflow: false,
-
     // index 0=WELCOME, 1=TO THE, 2=ぷるちか
-    //
-    // 【揃え方のコツ】
-    // ・cellWidthRem / cellHeightRem を3行同じにする（ハコを揃える）
-    // ・fit: 'manual' + 同じ wdth にする（字の太さ・横幅軸を揃える）
-    // ・文字数が少ない行ほど letterSpacing を大きくする（箱幅を埋める）
-    //
-    // 下は「同じハコ + 同じ wdth + 行ごと字間調整」の設定例:
     lines: [
       {
         cellWidthRem: 10.8,
@@ -265,15 +252,6 @@ export const HOME_TUTORIAL_INTRO_PANEL_TUNE: HomeTutorialIntroPanelTune = {
         letterSpacing: '0.20em',
       },
     ],
-
-    // ── 別パターン: 自動フィットのままハコだけ揃える ──
-    // fit: 'auto' にすると wdth / letter-spacing は行ごとに自動計算される。
-    // ハコ幅は揃うが、WELCOME だけ字が太く見えることがある。
-    // lines: [
-    //   { cellWidthRem: 10.8, cellHeightRem: 2.85, fontSizeRem: 2.45, wght: 860, fit: 'auto' },
-    //   { cellWidthRem: 10.8, cellHeightRem: 2.85, fontSizeRem: 2.45, wght: 860, fit: 'auto' },
-    //   { cellWidthRem: 10.8, cellHeightRem: 2.85, fontSizeRem: 2.45, wght: 860, fit: 'auto' },
-    // ],
   },
   body: {
     fontSizeRem: 0.9,
@@ -282,14 +260,11 @@ export const HOME_TUTORIAL_INTRO_PANEL_TUNE: HomeTutorialIntroPanelTune = {
     wght: 420,
     wdth: 96,
     gapPx: 14,
-    marginLeft: '52%',
-    maxWidth: '53%',
     paddingTopPx: 8,
   },
   layout: {
     rootMinHeightRem: 20,
     headerRowGapPx: 20,
-    lowerSectionMarginTopPx: 28,
     lowerMinHeightRem: 13.5,
     glowLeft: '44%',
     glowTop: '8%',

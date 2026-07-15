@@ -84,12 +84,8 @@ export interface IntroPanelResponsiveLayout {
   bodyMaxWidth: string;
   bodyTextAlign: 'left' | 'right';
   bodyAlignSelf: 'stretch' | 'flex-end';
-  sectionGapPx: number;
   /** スマホ時の文字・ハコ拡大率 */
   contentScale: number;
-  headerDirection: 'row' | 'column';
-  headerAlign: 'flex-start' | 'space-between';
-  welcomePosition: 'absolute' | 'relative';
   lowerMarginTopPx: number;
 }
 
@@ -109,11 +105,7 @@ export function getIntroPanelResponsiveLayout(
       bodyMaxWidth: '58%',
       bodyTextAlign: 'right',
       bodyAlignSelf: 'flex-end',
-      sectionGapPx: viewportMix(viewportWidth, 20, 40),
       contentScale: 1.5,
-      headerDirection: 'column',
-      headerAlign: 'flex-start',
-      welcomePosition: 'relative',
       lowerMarginTopPx: viewportMix(viewportWidth, 28, 18),
     };
   }
@@ -127,11 +119,7 @@ export function getIntroPanelResponsiveLayout(
     bodyMaxWidth: `${viewportMix(viewportWidth, 53, 58).toFixed(1)}%`,
     bodyTextAlign: 'left',
     bodyAlignSelf: 'stretch',
-    sectionGapPx: viewportMix(viewportWidth, 20, 28),
     contentScale: 1,
-    headerDirection: 'row',
-    headerAlign: 'space-between',
-    welcomePosition: 'absolute',
     lowerMarginTopPx: viewportMix(viewportWidth, 28, 22),
   };
 }
