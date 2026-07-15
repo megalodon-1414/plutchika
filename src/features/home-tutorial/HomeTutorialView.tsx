@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MainLandingLogo } from '../../components/landing/MainLandingLogo';
+import { LandingLoadingScreen } from '../../components/landing/LandingLoadingScreen';
+import { MainLandingLogo, MAIN_LANDING_LOGO_TUNE } from '../../components/landing/MainLandingLogo';
 import { ROUTES } from '../../routes/paths';
 import { DEFAULT_EMOTION_UI_ACCENT, getEmotionUiTheme } from '../../utils/emotionUiTheme';
 import {
+  HOME_LANDING_INTRO_MOVE_MS,
   HOME_TUTORIAL_CAMERA_TRANSITION_MS,
+  HOME_TUTORIAL_LOADING_FADE_MS,
+  HOME_TUTORIAL_LOADING_MIN_MS,
   HOME_TUTORIAL_PANEL_FADE_MS,
   HOME_TUTORIAL_STEPS,
   type HomeTutorialPanelVariant,
 } from './constants';
-import { HomeTutorialCanvas } from './HomeTutorialCanvas';
+import { HomeTutorialCanvas, type HomeLandingIntroPhase } from './HomeTutorialCanvas';
 import { HomeTutorialEmotionWheelPanel } from './HomeTutorialEmotionWheelPanel';
 import { HomeTutorialIntroPanel } from './HomeTutorialIntroPanel';
 import { getHomeTutorialPanelLayout } from './panelLayout';
@@ -28,8 +32,13 @@ export function HomeTutorialView() {
     visible: boolean;
   } | null>(null);
   const [isPanelVisible, setIsPanelVisible] = useState(false);
-  const [isLandingChromeVisible, setIsLandingChromeVisible] = useState(true);
+  const [isLandingChromeVisible, setIsLandingChromeVisible] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(true);
+  const [isLoadingFading, setIsLoadingFading] = useState(false);
+  const [isCanvasReady, setIsCanvasReady] = useState(false);
+  const [landingIntroPhase, setLandingIntroPhase] = useState<HomeLandingIntroPhase>('pending');
+  const loadingStartedAtRef = useRef(Date.now());
   const transitionTimersRef = useRef<number[]>([]);
 
   const uiTheme = useMemo(() => getEmotionUiTheme(DEFAULT_EMOTION_UI_ACCENT, 'dark'), []);
@@ -75,6 +84,45 @@ export function HomeTutorialView() {
   }, []);
 
   useEffect(() => () => clearTransitionTimers(), [clearTransitionTimers]);
+
+  const handleCanvasReady = useCallback(() => {
+    setIsCanvasReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isCanvasReady || !isPageLoading) {
+      return;
+    }
+
+    const elapsed = Date.now() - loadingStartedAtRef.current;
+    const remaining = Math.max(0, HOME_TUTORIAL_LOADING_MIN_MS - elapsed);
+    const fadeTimer = window.setTimeout(() => {
+      setIsLoadingFading(true);
+    }, remaining);
+    const hideTimer = window.setTimeout(() => {
+      setIsPageLoading(false);
+      setIsLoadingFading(false);
+      setLandingIntroPhase('moving');
+    }, remaining + HOME_TUTORIAL_LOADING_FADE_MS);
+
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [isCanvasReady, isPageLoading]);
+
+  useEffect(() => {
+    if (landingIntroPhase !== 'moving') {
+      return;
+    }
+
+    const introTimer = window.setTimeout(() => {
+      setLandingIntroPhase('done');
+      setIsLandingChromeVisible(true);
+    }, HOME_LANDING_INTRO_MOVE_MS);
+
+    return () => window.clearTimeout(introTimer);
+  }, [landingIntroPhase]);
 
   const handleStepSelect = useCallback((nextIndex: number) => {
     if (
@@ -135,6 +183,9 @@ export function HomeTutorialView() {
     mainSize.height > 0;
 
   const uiScale = panelLayout.scale;
+  const showLandingHeading =
+    isLandingChromeVisible && !isPageLoading && landingIntroPhase === 'done';
+  const showLandingMapLink = !isPageLoading;
 
   return (
     <div
@@ -163,10 +214,14 @@ export function HomeTutorialView() {
       </style>
 
       <main ref={mainRef} style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+        <LandingLoadingScreen visible={isPageLoading} fading={isLoadingFading} />
+
         <HomeTutorialCanvas
           activeStepIndex={activeStepIndex}
+          landingIntroPhase={landingIntroPhase}
           onActiveSphereScreenPosition={setSphereScreenPoint}
           onStepSelect={handleStepSelect}
+          onReady={handleCanvasReady}
         />
 
         <div
@@ -176,10 +231,11 @@ export function HomeTutorialView() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            paddingRight: 'clamp(6%, 10vw, 14%)',
+            paddingRight: MAIN_LANDING_LOGO_TUNE.rightInset,
+            transform: `translateY(${MAIN_LANDING_LOGO_TUNE.offsetY}px)`,
             pointerEvents: 'none',
             zIndex: 1,
-            opacity: isLandingChromeVisible ? 1 : 0,
+            opacity: showLandingHeading ? 1 : 0,
             transition: `opacity ${HOME_TUTORIAL_PANEL_FADE_MS}ms ease`,
           }}
         >
@@ -187,29 +243,52 @@ export function HomeTutorialView() {
         </div>
 
         {showGuideLine && sphereScreenPoint && (
-          <svg
-            width="100%"
-            height="100%"
-            viewBox={`0 0 ${mainSize.width} ${mainSize.height}`}
-            preserveAspectRatio="none"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 2,
-              pointerEvents: 'none',
-              overflow: 'visible',
-            }}
-          >
-            <line
-              x1={sphereScreenPoint.x}
-              y1={sphereScreenPoint.y}
-              x2={guidePanel.x + guidePanel.width * guidePanel.anchorX}
-              y2={guidePanel.y + guidePanel.height * guidePanel.anchorY}
-              stroke={uiTheme.guideLine}
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-            />
-          </svg>
+          <>
+            <svg
+              width="100%"
+              height="100%"
+              viewBox={`0 0 ${mainSize.width} ${mainSize.height}`}
+              preserveAspectRatio="none"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 2,
+                pointerEvents: 'none',
+                overflow: 'visible',
+              }}
+            >
+              <line
+                x1={sphereScreenPoint.x}
+                y1={sphereScreenPoint.y}
+                x2={guidePanel.x + guidePanel.width * guidePanel.anchorX}
+                y2={guidePanel.y + guidePanel.height * guidePanel.anchorY}
+                stroke={uiTheme.guideLine}
+                strokeWidth={3}
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+            <svg
+              width="100%"
+              height="100%"
+              viewBox={`0 0 ${mainSize.width} ${mainSize.height}`}
+              preserveAspectRatio="none"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 4,
+                pointerEvents: 'none',
+                overflow: 'visible',
+              }}
+            >
+              <circle
+                cx={guidePanel.x + guidePanel.width * guidePanel.anchorX}
+                cy={guidePanel.y + guidePanel.height * guidePanel.anchorY}
+                r={4}
+                fill={uiTheme.accent}
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          </>
         )}
 
         {panelContent && isEmotionWheelPanel ? (
@@ -225,9 +304,11 @@ export function HomeTutorialView() {
             panel={panelLayout.panel}
             content={panelContent}
             visible={showIntroPanel && isPanelVisible}
+            viewportWidth={mainSize.width}
           />
         ) : null}
 
+        {showLandingMapLink && (
         <Link
           to={ROUTES.emotionMap}
           style={{
@@ -248,6 +329,7 @@ export function HomeTutorialView() {
         >
           感情MAPへ
         </Link>
+        )}
       </main>
     </div>
   );

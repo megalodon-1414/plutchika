@@ -4,12 +4,15 @@ import * as THREE from 'three';
 import { applySelectionViewOffset, clearSelectionViewOffset } from '../../utils/cameraFocus';
 import { getHomeTutorialCameraPose } from './camera';
 import {
+  HOME_LANDING_INTRO_CENTER_ANCHOR,
+  HOME_LANDING_INTRO_MOVE_MS,
   HOME_TUTORIAL_ACTIVE_HOVER_SCALE_BOOST,
   HOME_TUTORIAL_ACTIVE_SPHERE_SCALE,
   HOME_TUTORIAL_HOVER_SPHERE_SCALE,
   HOME_TUTORIAL_SPHERE_RADIUS,
   HOME_TUTORIAL_STEPS,
 } from './constants';
+import { getResponsiveScreenAnchor, getStepWorldPosition } from './responsive';
 import { HomeTutorialPlutchikWheel3D } from './HomeTutorialPlutchikWheel3D';
 import { HomeTutorialVoidCloud } from './HomeTutorialVoidCloud';
 import { OrbitingStepLabel, StepGuideParticles } from './HomeTutorialStepGuides';
@@ -19,33 +22,72 @@ const CAMERA_POS_LERP_SPEED = 3.4;
 const LOOK_AT_LERP_SPEED = 3.6;
 const ANCHOR_LERP_SPEED = 5.5;
 
+export type HomeLandingIntroPhase = 'pending' | 'moving' | 'done';
+
 interface HomeTutorialCanvasProps {
   activeStepIndex: number;
+  landingIntroPhase?: HomeLandingIntroPhase;
   onActiveSphereScreenPosition?: (point: { x: number; y: number; visible: boolean } | null) => void;
   onStepSelect?: (index: number) => void;
+  onReady?: () => void;
+}
+
+function SceneReadyNotifier({ onReady }: { onReady?: () => void }) {
+  const notified = useRef(false);
+
+  useFrame(() => {
+    if (notified.current || !onReady) {
+      return;
+    }
+    notified.current = true;
+    onReady();
+  });
+
+  return null;
 }
 
 function HomeTutorialCamera({
   activeStepIndex,
+  landingIntroPhase = 'done',
 }: {
   activeStepIndex: number;
+  landingIntroPhase?: HomeLandingIntroPhase;
 }) {
   const { camera, size } = useThree();
   const targetLookAt = useRef(new THREE.Vector3());
   const smoothLookAt = useRef(new THREE.Vector3());
   const targetCameraPos = useRef(new THREE.Vector3());
   const smoothCameraPos = useRef(new THREE.Vector3());
-  const currentAnchor = useRef({ ...HOME_TUTORIAL_STEPS[0].screenAnchor });
+  const currentAnchor = useRef({ ...HOME_LANDING_INTRO_CENTER_ANCHOR });
   const targetAnchor = useRef({ ...HOME_TUTORIAL_STEPS[0].screenAnchor });
+  const introMoveProgress = useRef(0);
   const initialized = useRef(false);
 
-  const applyPoseTargets = (stepIndex: number) => {
+  const resolveScreenAnchor = (stepIndex: number) => {
     const step = HOME_TUTORIAL_STEPS[stepIndex] ?? HOME_TUTORIAL_STEPS[0];
-    const pose = getHomeTutorialCameraPose(step);
+    return getResponsiveScreenAnchor(step.id, size.width, step.screenAnchor);
+  };
+
+  const applyPoseTargets = (stepIndex: number, viewportWidth: number) => {
+    const step = HOME_TUTORIAL_STEPS[stepIndex] ?? HOME_TUTORIAL_STEPS[0];
+    const pose = getHomeTutorialCameraPose(step, viewportWidth);
+    const responsiveAnchor = getResponsiveScreenAnchor(step.id, viewportWidth, step.screenAnchor);
     targetLookAt.current.copy(pose.lookAt);
     targetCameraPos.current.copy(pose.position);
-    targetAnchor.current = step.screenAnchor;
+    if (stepIndex === 0 && landingIntroPhase !== 'done') {
+      targetAnchor.current = landingIntroPhase === 'pending'
+        ? HOME_LANDING_INTRO_CENTER_ANCHOR
+        : responsiveAnchor;
+      return;
+    }
+    targetAnchor.current = responsiveAnchor;
   };
+
+  useEffect(() => {
+    if (landingIntroPhase === 'moving') {
+      introMoveProgress.current = 0;
+    }
+  }, [landingIntroPhase]);
 
   useEffect(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) {
@@ -56,13 +98,18 @@ function HomeTutorialCamera({
     camera.updateProjectionMatrix();
 
     if (!initialized.current) {
-      const pose = getHomeTutorialCameraPose(HOME_TUTORIAL_STEPS[0]);
+      const pose = getHomeTutorialCameraPose(HOME_TUTORIAL_STEPS[0], size.width);
       smoothLookAt.current.copy(pose.lookAt);
       smoothCameraPos.current.copy(pose.position);
       targetLookAt.current.copy(pose.lookAt);
       targetCameraPos.current.copy(pose.position);
-      currentAnchor.current = { ...HOME_TUTORIAL_STEPS[0].screenAnchor };
-      targetAnchor.current = { ...HOME_TUTORIAL_STEPS[0].screenAnchor };
+      const initialAnchor = landingIntroPhase === 'done'
+        ? resolveScreenAnchor(0)
+        : HOME_LANDING_INTRO_CENTER_ANCHOR;
+      currentAnchor.current = { ...initialAnchor };
+      targetAnchor.current = landingIntroPhase === 'pending'
+        ? HOME_LANDING_INTRO_CENTER_ANCHOR
+        : resolveScreenAnchor(0);
       camera.position.copy(smoothCameraPos.current);
       camera.lookAt(smoothLookAt.current);
       applySelectionViewOffset(camera, size.width, size.height, 1, currentAnchor.current);
@@ -72,11 +119,11 @@ function HomeTutorialCamera({
     return () => {
       clearSelectionViewOffset(camera);
     };
-  }, [camera, size.width, size.height]);
+  }, [camera, landingIntroPhase, size.width, size.height]);
 
   useEffect(() => {
-    applyPoseTargets(activeStepIndex);
-  }, [activeStepIndex]);
+    applyPoseTargets(activeStepIndex, size.width);
+  }, [activeStepIndex, landingIntroPhase, size.width]);
 
   useFrame((_, delta) => {
     if (!(camera instanceof THREE.PerspectiveCamera)) {
@@ -89,10 +136,24 @@ function HomeTutorialCamera({
 
     smoothCameraPos.current.lerp(targetCameraPos.current, posLerp);
     smoothLookAt.current.lerp(targetLookAt.current, lookLerp);
-    currentAnchor.current = {
-      x: THREE.MathUtils.lerp(currentAnchor.current.x, targetAnchor.current.x, anchorLerp),
-      y: THREE.MathUtils.lerp(currentAnchor.current.y, targetAnchor.current.y, anchorLerp),
-    };
+
+    if (activeStepIndex === 0 && landingIntroPhase === 'moving') {
+      introMoveProgress.current = Math.min(
+        1,
+        introMoveProgress.current + delta / (HOME_LANDING_INTRO_MOVE_MS / 1000),
+      );
+      const eased = 1 - (1 - introMoveProgress.current) ** 3;
+      const finalAnchor = resolveScreenAnchor(0);
+      currentAnchor.current = {
+        x: THREE.MathUtils.lerp(HOME_LANDING_INTRO_CENTER_ANCHOR.x, finalAnchor.x, eased),
+        y: THREE.MathUtils.lerp(HOME_LANDING_INTRO_CENTER_ANCHOR.y, finalAnchor.y, eased),
+      };
+    } else {
+      currentAnchor.current = {
+        x: THREE.MathUtils.lerp(currentAnchor.current.x, targetAnchor.current.x, anchorLerp),
+        y: THREE.MathUtils.lerp(currentAnchor.current.y, targetAnchor.current.y, anchorLerp),
+      };
+    }
 
     camera.position.copy(smoothCameraPos.current);
     camera.lookAt(smoothLookAt.current);
@@ -121,6 +182,7 @@ function TutorialStepSphere({
   const lastPoint = useRef<{ x: number; y: number; visible: boolean } | null>(null);
   const frameCounter = useRef(0);
   const step = HOME_TUTORIAL_STEPS[stepIndex];
+  const worldPosition = getStepWorldPosition(step.id, step.worldPosition, size.width);
   const isActive = stepIndex === activeStepIndex;
   const isClickable = !isActive;
   const inactiveScale = 0.9;
@@ -174,7 +236,7 @@ function TutorialStepSphere({
   return (
     <mesh
       ref={meshRef}
-      position={step.worldPosition}
+      position={worldPosition}
       onClick={(event) => {
         if (!isClickable || !onStepSelect) {
           return;
@@ -211,10 +273,13 @@ function TutorialStepSphere({
 
 export function HomeTutorialCanvas({
   activeStepIndex,
+  landingIntroPhase = 'done',
   onActiveSphereScreenPosition,
   onStepSelect,
+  onReady,
 }: HomeTutorialCanvasProps) {
-  const initialPose = getHomeTutorialCameraPose(HOME_TUTORIAL_STEPS[0]);
+  const initialViewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const initialPose = getHomeTutorialCameraPose(HOME_TUTORIAL_STEPS[0], initialViewportWidth);
   const activeStep = HOME_TUTORIAL_STEPS[activeStepIndex] ?? HOME_TUTORIAL_STEPS[0];
   const mainStep = HOME_TUTORIAL_STEPS[0];
   const showPlutchikWheel = activeStepIndex === 0;
@@ -228,9 +293,13 @@ export function HomeTutorialCanvas({
       style={{ width: '100%', height: '100%' }}
     >
       <color attach="background" args={['#030508']} />
+      <SceneReadyNotifier onReady={onReady} />
       <ambientLight intensity={0.45} />
       <pointLight position={[2, 3, 4]} intensity={0.9} />
-      <HomeTutorialCamera activeStepIndex={activeStepIndex} />
+      <HomeTutorialCamera
+        activeStepIndex={activeStepIndex}
+        landingIntroPhase={landingIntroPhase}
+      />
       <HomeTutorialVoidCloud />
       <HomeTutorialPlutchikWheel3D
         center={mainStep.worldPosition}

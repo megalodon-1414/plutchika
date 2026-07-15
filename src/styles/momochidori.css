@@ -1,0 +1,32 @@
+/**
+ * 百千鳥 VF（Adobe Fonts）
+ * Webプロジェクト（use.typekit.net/txa4lsh）に「百千鳥 VF」を追加してください。
+ */
+:root {
+  --font-family-momochidori: 'momochidori-variable', 'momochidori', 'Hiragino Sans', sans-serif;
+}
+
+.font-momochidori {
+  font-family: var(--font-family-momochidori);
+  font-feature-settings: 'palt' 1;
+}
+
+.font-momochidori--medium {
+  font-variation-settings: 'wght' 500, 'wdth' 100;
+}
+
+.font-momochidori--semibold {
+  font-variation-settings: 'wght' 650, 'wdth' 100;
+}
+
+.font-momochidori--bold {
+  font-variation-settings: 'wght' 750, 'wdth' 100;
+}
+
+.font-momochidori--display-condensed {
+  font-variation-settings: 'wght' 820, 'wdth' 68;
+}
+
+.font-momochidori--brand {
+  font-variation-settings: 'wght' 700, 'wdth' 108;
+}
