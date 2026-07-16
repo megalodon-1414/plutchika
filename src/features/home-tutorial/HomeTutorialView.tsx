@@ -442,26 +442,51 @@ export function HomeTutorialView() {
         ) : null}
 
         {showLandingMapLink && (
-        <Link
-          to={ROUTES.emotionMap}
+        <div
           style={{
             position: 'absolute',
             right: '16px',
             bottom: '16px',
             zIndex: 3,
-            padding: `${Math.round(8 * uiScale)}px ${Math.round(14 * uiScale)}px`,
-            border: `1px solid ${uiTheme.controlBorder}`,
-            borderRadius: `${Math.round(8 * uiScale)}px`,
-            backgroundColor: uiTheme.controlBackground,
-            color: uiTheme.controlText,
-            fontSize: `${(0.78 * uiScale).toFixed(3)}rem`,
-            letterSpacing: '0.06em',
-            textDecoration: 'none',
-            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: `${Math.round(8 * uiScale)}px`,
           }}
         >
-          感情MAPへ
-        </Link>
+          <Link
+            to={ROUTES.telescopeSpace}
+            style={{
+              padding: `${Math.round(8 * uiScale)}px ${Math.round(14 * uiScale)}px`,
+              border: `1px solid ${uiTheme.controlBorder}`,
+              borderRadius: `${Math.round(8 * uiScale)}px`,
+              backgroundColor: uiTheme.controlBackground,
+              color: uiTheme.controlText,
+              fontSize: `${(0.78 * uiScale).toFixed(3)}rem`,
+              letterSpacing: '0.06em',
+              textDecoration: 'none',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            望遠鏡空間（実験）
+          </Link>
+          <Link
+            to={ROUTES.emotionMap}
+            style={{
+              padding: `${Math.round(8 * uiScale)}px ${Math.round(14 * uiScale)}px`,
+              border: `1px solid ${uiTheme.controlBorder}`,
+              borderRadius: `${Math.round(8 * uiScale)}px`,
+              backgroundColor: uiTheme.controlBackground,
+              color: uiTheme.controlText,
+              fontSize: `${(0.78 * uiScale).toFixed(3)}rem`,
+              letterSpacing: '0.06em',
+              textDecoration: 'none',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            感情MAPへ
+          </Link>
+        </div>
         )}
       </main>
     </div>

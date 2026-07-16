@@ -3,6 +3,7 @@ import { SiteLayout } from '../components/site/SiteLayout';
 import { DevWordsEditorPage } from '../pages/DevWordsEditorPage';
 import { EmotionMapPage } from '../pages/EmotionMapPage';
 import { HomePage } from '../pages/HomePage';
+import { TelescopeSpacePage } from '../pages/TelescopeSpacePage';
 import { ROUTES } from './paths';
 
 export function AppRouter() {
@@ -12,6 +13,7 @@ export function AppRouter() {
         <Route element={<SiteLayout showSiteChrome={false} />}>
           <Route path={ROUTES.home} element={<HomePage />} />
           <Route path={ROUTES.emotionMap} element={<EmotionMapPage />} />
+          <Route path={ROUTES.telescopeSpace} element={<TelescopeSpacePage />} />
         </Route>
         <Route element={<SiteLayout showSiteChrome />}>
           <Route path={ROUTES.devWords} element={<DevWordsEditorPage />} />
