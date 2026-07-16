@@ -10,6 +10,8 @@ export interface MinimapSyncState {
   primaryId: EmotionId | null;
   /** Supabase emotions.name（あれば Map 表記に優先使用） */
   primaryLabel?: string | null;
+  /** Layer02: 選択基本感情から合成相手への関連線をミニマップに出す */
+  relatedLinkBasicId?: BasicEmotionId | null;
 }
 
 /** ミニマップ表示用スケール（感情環半径を 1 に正規化） */

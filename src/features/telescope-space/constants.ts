@@ -19,6 +19,13 @@ export const TELESCOPE_CAMERA_DISTANCE_WIDE = 21.6;
  */
 export const TELESCOPE_CAMERA_DISTANCE_ZOOM = 24.4;
 export const TELESCOPE_CAMERA_FOV = 42;
+/** Layer1→2: 引き画角（広げて描画範囲を拡大） */
+export const TELESCOPE_LAYER2_PULLBACK_FOV = 48;
+/** Layer1→2: クリック時アングル維持のまま後退する距離倍率 */
+export const TELESCOPE_LAYER2_PULLBACK_DISTANCE_MUL = 1.28;
+export const TELESCOPE_LAYER2_PULLBACK_MS = 600;
+/** Layer1→2: 後退後に選択感情へ向けて回転する時間 */
+export const TELESCOPE_LAYER2_ROTATE_MS = 900;
 export const TELESCOPE_ZOOM_MS = 1400;
 
 /** 円形ビューポートの最大直径 */
@@ -112,7 +119,7 @@ export function buildTelescopeGalaxyNodes(): TelescopeNodePosition[] {
 }
 
 /**
- * 24合成感情 — 構成する2基本感情の座標中点に置く。
+ * 24合成感情 — 構成する2基本感情を結ぶ線分上（中点）に置く。
  * 8基本と合わせて32感情の固定配置。
  */
 export function buildTelescopeDetailNodes(): TelescopeNodePosition[] {
@@ -124,9 +131,10 @@ export function buildTelescopeDetailNodes(): TelescopeNodePosition[] {
     const [aId, bId] = dyad.components;
     const a = basicPos.get(aId)!;
     const b = basicPos.get(bId)!;
+    // 2基本感情を結ぶ線分の中点（平面上＝線上）
     const x = (a[0] + b[0]) * 0.5;
     const y = (a[1] + b[1]) * 0.5;
-    const z = -0.06 * dyad.distance;
+    const z = (a[2] + b[2]) * 0.5;
 
     return {
       id: dyad.id,

@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { BASIC_EMOTIONS } from '../data/emotions';
+import { BASIC_EMOTIONS, getBasicEmotion, isBasicEmotionId } from '../data/emotions';
 import type { EmotionUiTheme } from '../utils/emotionUiTheme';
 import { getEmotionPositionInfo } from '../utils/emotionCoordinates';
+import type { MinimapSyncState } from '../utils/emotionMinimapLayout';
 import {
-  MINIMAP_DEFAULT_CAMERA,
-  MINIMAP_SHAPE_CENTER,
-  buildMinimapWireframePositions,
-  getBasicEmotionMinimapVertices,
-  getMinimapBoundingRadius,
-  worldTupleToMinimapLocal,
-  type MinimapSyncState,
-} from '../utils/emotionMinimapLayout';
+  getMinimapLayoutConfig,
+  type EmotionMinimapLayout,
+  type MinimapLayoutConfig,
+} from '../utils/telescopeMinimapLayout';
+import { getDyadPartnerBasicIds } from '../features/telescope-space/focusCameraView';
 
 const VIEWPORT = 156;
 const SIDE_LABEL_WIDTH = 44;
@@ -25,9 +23,14 @@ const FIT_MARGIN = 1.14;
 const UI_COLOR_TRANSITION =
   'border-color 320ms ease, background-color 320ms ease, color 320ms ease, box-shadow 320ms ease';
 
+export type { EmotionMinimapLayout };
+
 interface EmotionMinimapProps {
   syncState: MinimapSyncState | null;
   uiTheme: EmotionUiTheme;
+  layout?: EmotionMinimapLayout;
+  /** 現在地マーカー: 感情の位置かカメラの実位置 */
+  positionMarker?: 'focus' | 'camera';
   active?: boolean;
   onClick?: () => void;
 }
@@ -40,12 +43,18 @@ function computeFitDistance(camera: THREE.PerspectiveCamera, boundingRadius: num
   return Math.max(verticalDistance, horizontalDistance) * FIT_MARGIN;
 }
 
-function MinimapCamera({ syncState }: { syncState: MinimapSyncState | null }) {
+function MinimapCamera({
+  syncState,
+  layoutConfig,
+}: {
+  syncState: MinimapSyncState | null;
+  layoutConfig: MinimapLayoutConfig;
+}) {
   const { camera } = useThree();
-  const shapeCenter = useRef(new THREE.Vector3(...MINIMAP_SHAPE_CENTER));
-  const desiredPosition = useRef(new THREE.Vector3(...MINIMAP_DEFAULT_CAMERA));
+  const shapeCenter = useRef(new THREE.Vector3(...layoutConfig.shapeCenter));
+  const desiredPosition = useRef(new THREE.Vector3(...layoutConfig.defaultCamera));
   const desiredUp = useRef(new THREE.Vector3(0, 1, 0));
-  const boundingRadius = useMemo(() => getMinimapBoundingRadius(), []);
+  const boundingRadius = useMemo(() => layoutConfig.getBoundingRadius(), [layoutConfig]);
 
   useFrame(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) {
@@ -55,18 +64,18 @@ function MinimapCamera({ syncState }: { syncState: MinimapSyncState | null }) {
     const fitDistance = computeFitDistance(camera, boundingRadius);
 
     if (syncState) {
-      const camPos = new THREE.Vector3(...worldTupleToMinimapLocal(syncState.cameraPosition));
-      const camTarget = new THREE.Vector3(...worldTupleToMinimapLocal(syncState.cameraTarget));
+      const camPos = new THREE.Vector3(...layoutConfig.worldTupleToLocal(syncState.cameraPosition));
+      const camTarget = new THREE.Vector3(...layoutConfig.worldTupleToLocal(syncState.cameraTarget));
       const viewDir = camPos.sub(camTarget);
       if (viewDir.lengthSq() > 1e-6) {
         desiredPosition.current.copy(shapeCenter.current).add(viewDir.normalize().multiplyScalar(fitDistance));
       } else {
-        desiredPosition.current.set(...MINIMAP_DEFAULT_CAMERA).normalize().multiplyScalar(fitDistance);
+        desiredPosition.current.set(...layoutConfig.defaultCamera).normalize().multiplyScalar(fitDistance);
       }
       desiredUp.current.set(...syncState.cameraUp).normalize();
     } else {
       desiredPosition.current
-        .set(...MINIMAP_DEFAULT_CAMERA)
+        .set(...layoutConfig.defaultCamera)
         .normalize()
         .multiplyScalar(fitDistance);
       desiredUp.current.set(0, 1, 0);
@@ -80,12 +89,18 @@ function MinimapCamera({ syncState }: { syncState: MinimapSyncState | null }) {
   return null;
 }
 
-function MinimapWireframe({ holoColor }: { holoColor: string }) {
+function MinimapWireframe({
+  holoColor,
+  layoutConfig,
+}: {
+  holoColor: string;
+  layoutConfig: MinimapLayoutConfig;
+}) {
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(buildMinimapWireframePositions(), 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(layoutConfig.buildWireframePositions(), 3));
     return geo;
-  }, []);
+  }, [layoutConfig]);
 
   const glowMat = useMemo(
     () =>
@@ -135,15 +150,21 @@ function MinimapWireframe({ holoColor }: { holoColor: string }) {
   );
 }
 
-function MinimapEmotionNodes() {
-  const vertices = useMemo(() => getBasicEmotionMinimapVertices(), []);
+function MinimapEmotionNodes({
+  layoutConfig,
+  starScale = 1,
+}: {
+  layoutConfig: MinimapLayoutConfig;
+  starScale?: number;
+}) {
+  const vertices = useMemo(() => layoutConfig.getBasicVertices(), [layoutConfig]);
 
   return (
     <>
       {BASIC_EMOTIONS.map((emotion) => {
         const [x, y, z] = vertices[emotion.id];
         return (
-          <group key={emotion.id} position={[x, y, z]}>
+          <group key={emotion.id} position={[x, y, z]} scale={starScale}>
             <mesh scale={1.8}>
               <sphereGeometry args={[0.045, 10, 10]} />
               <meshBasicMaterial
@@ -168,46 +189,47 @@ function MinimapEmotionNodes() {
 function MinimapFocusMarker({
   syncState,
   markerColor,
+  layoutConfig,
+  positionMarker,
 }: {
   syncState: MinimapSyncState | null;
   markerColor: string;
+  layoutConfig: MinimapLayoutConfig;
+  positionMarker: 'focus' | 'camera';
 }) {
   const markerRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
-  const reticleRef = useRef<THREE.Mesh>(null);
 
   useFrame((state) => {
     if (!markerRef.current) {
       return;
     }
 
-    if (!syncState?.focusPosition) {
+    const markerPosition =
+      positionMarker === 'camera' ? syncState?.cameraPosition : syncState?.focusPosition;
+
+    if (!markerPosition) {
       markerRef.current.visible = false;
       return;
     }
 
     markerRef.current.visible = true;
-    markerRef.current.position.set(...worldTupleToMinimapLocal(syncState.focusPosition));
+    markerRef.current.position.set(...layoutConfig.worldTupleToLocal(markerPosition));
 
     const pulse = 1 + Math.sin(state.clock.elapsedTime * 3.6) * 0.1;
     if (ringRef.current) {
       ringRef.current.scale.setScalar(pulse);
-      ringRef.current.rotation.z = state.clock.elapsedTime * 0.8;
-    }
-    if (reticleRef.current) {
-      reticleRef.current.rotation.z = -state.clock.elapsedTime * 1.1;
+      // RingGeometry は XY 平面。カメラ正面を向くよう billboard する
+      ringRef.current.quaternion.copy(state.camera.quaternion);
+      ringRef.current.rotateZ(state.clock.elapsedTime * 0.8);
     }
   });
 
   return (
     <group ref={markerRef} visible={false}>
-      <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh ref={ringRef}>
         <ringGeometry args={[0.11, 0.145, 32]} />
         <meshBasicMaterial color={markerColor} transparent opacity={0.5} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
-      </mesh>
-      <mesh ref={reticleRef} rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.07, 0.078, 4]} />
-        <meshBasicMaterial color="#ffffff" transparent opacity={0.9} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} depthWrite={false} />
       </mesh>
       <mesh>
         <sphereGeometry args={[0.058, 12, 12]} />
@@ -228,9 +250,13 @@ function MinimapFocusMarker({
 function MinimapViewRay({
   syncState,
   markerColor,
+  layoutConfig,
+  positionMarker,
 }: {
   syncState: MinimapSyncState | null;
   markerColor: string;
+  layoutConfig: MinimapLayoutConfig;
+  positionMarker: 'focus' | 'camera';
 }) {
   const line = useMemo(() => {
     const geometry = new THREE.BufferGeometry();
@@ -256,15 +282,31 @@ function MinimapViewRay({
   );
 
   useFrame((state) => {
-    if (!syncState?.focusPosition) {
+    if (!syncState?.cameraPosition || !syncState.cameraTarget) {
       line.visible = false;
       return;
     }
 
-    const focus = new THREE.Vector3(...worldTupleToMinimapLocal(syncState.focusPosition));
-    const camPos = new THREE.Vector3(...worldTupleToMinimapLocal(syncState.cameraPosition));
-    const camTarget = new THREE.Vector3(...worldTupleToMinimapLocal(syncState.cameraTarget));
-    const dir = camPos.sub(camTarget);
+    const camPos = new THREE.Vector3(...layoutConfig.worldTupleToLocal(syncState.cameraPosition));
+    const camTarget = new THREE.Vector3(...layoutConfig.worldTupleToLocal(syncState.cameraTarget));
+
+    if (positionMarker === 'camera') {
+      const attr = line.geometry.getAttribute('position') as THREE.BufferAttribute;
+      attr.setXYZ(0, camPos.x, camPos.y, camPos.z);
+      attr.setXYZ(1, camTarget.x, camTarget.y, camTarget.z);
+      attr.needsUpdate = true;
+      (line.material as THREE.LineBasicMaterial).opacity = 0.7 + Math.sin(state.clock.elapsedTime * 5) * 0.15;
+      line.visible = true;
+      return;
+    }
+
+    if (!syncState.focusPosition) {
+      line.visible = false;
+      return;
+    }
+
+    const focus = new THREE.Vector3(...layoutConfig.worldTupleToLocal(syncState.focusPosition));
+    const dir = camPos.clone().sub(camTarget);
 
     if (dir.lengthSq() < 1e-6) {
       line.visible = false;
@@ -283,23 +325,164 @@ function MinimapViewRay({
   return <primitive object={line} />;
 }
 
+/**
+ * Layer02 相当: 選択基本感情から合成相手の星の中心へ細い線を伸ばす（ミニマップ用）。
+ */
+function MinimapRelatedEmotionLinks({
+  syncState,
+  layoutConfig,
+}: {
+  syncState: MinimapSyncState | null;
+  layoutConfig: MinimapLayoutConfig;
+}) {
+  const vertices = useMemo(() => layoutConfig.getBasicVertices(), [layoutConfig]);
+
+  const linkData = useMemo(() => {
+    const fromId = syncState?.relatedLinkBasicId;
+    if (!fromId || !isBasicEmotionId(fromId)) {
+      return null;
+    }
+    const from = vertices[fromId];
+    if (!from) {
+      return null;
+    }
+    const partners = getDyadPartnerBasicIds(fromId)
+      .map((id) => vertices[id])
+      .filter(Boolean) as [number, number, number][];
+    if (partners.length === 0) {
+      return null;
+    }
+    return {
+      color: getBasicEmotion(fromId).color,
+      from,
+      partners,
+    };
+  }, [syncState?.relatedLinkBasicId, vertices]);
+
+  const line = useMemo(() => {
+    if (!linkData) {
+      return null;
+    }
+    const positions = new Float32Array(linkData.partners.length * 6);
+    for (let i = 0; i < linkData.partners.length; i++) {
+      const to = linkData.partners[i];
+      positions[i * 6] = linkData.from[0];
+      positions[i * 6 + 1] = linkData.from[1];
+      positions[i * 6 + 2] = linkData.from[2];
+      positions[i * 6 + 3] = to[0];
+      positions[i * 6 + 4] = to[1];
+      positions[i * 6 + 5] = to[2];
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.LineBasicMaterial({
+      color: linkData.color,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+    });
+    return new THREE.LineSegments(geometry, material);
+  }, [linkData]);
+
+  useEffect(
+    () => () => {
+      if (!line) {
+        return;
+      }
+      line.geometry.dispose();
+      (line.material as THREE.Material).dispose();
+    },
+    [line],
+  );
+
+  useFrame((state) => {
+    if (!line) {
+      return;
+    }
+    (line.material as THREE.LineBasicMaterial).opacity =
+      0.48 + Math.sin(state.clock.elapsedTime * 1.8) * 0.08;
+  });
+
+  if (!line || !linkData) {
+    return null;
+  }
+
+  return (
+    <group>
+      <primitive object={line} />
+      {linkData.partners.map((to, index) => {
+        const mid: [number, number, number] = [
+          (linkData.from[0] + to[0]) * 0.5,
+          (linkData.from[1] + to[1]) * 0.5,
+          (linkData.from[2] + to[2]) * 0.5,
+        ];
+        return (
+          <group key={`dyad-mid-${index}`} position={mid}>
+            <mesh>
+              <sphereGeometry args={[0.032, 10, 10]} />
+              <meshBasicMaterial
+                color={linkData.color}
+                transparent
+                opacity={0.45}
+                blending={THREE.AdditiveBlending}
+                depthWrite={false}
+              />
+            </mesh>
+            <mesh>
+              <sphereGeometry args={[0.018, 8, 8]} />
+              <meshBasicMaterial color={linkData.color} transparent opacity={0.9} />
+            </mesh>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
 function MinimapScene({
   syncState,
   holoColor,
   markerColor,
+  layoutConfig,
+  positionMarker,
+  galaxyRing,
 }: {
   syncState: MinimapSyncState | null;
   holoColor: string;
   markerColor: string;
+  layoutConfig: MinimapLayoutConfig;
+  positionMarker: 'focus' | 'camera';
+  galaxyRing: boolean;
 }) {
   return (
     <>
-      <MinimapCamera syncState={syncState} />
+      <MinimapCamera syncState={syncState} layoutConfig={layoutConfig} />
       <ambientLight intensity={0.45} />
-      <MinimapWireframe holoColor={holoColor} />
-      <MinimapEmotionNodes />
-      <MinimapFocusMarker syncState={syncState} markerColor={markerColor} />
-      <MinimapViewRay syncState={syncState} markerColor={markerColor} />
+      {/* 円形銀河レイアウトでは星同士の接続線は出さない */}
+      {!galaxyRing ? (
+        <MinimapWireframe holoColor={holoColor} layoutConfig={layoutConfig} />
+      ) : null}
+      <MinimapEmotionNodes
+        layoutConfig={layoutConfig}
+        starScale={galaxyRing ? 1.85 : 1}
+      />
+      {galaxyRing ? (
+        <MinimapRelatedEmotionLinks syncState={syncState} layoutConfig={layoutConfig} />
+      ) : null}
+      <MinimapFocusMarker
+        syncState={syncState}
+        markerColor={markerColor}
+        layoutConfig={layoutConfig}
+        positionMarker={positionMarker}
+      />
+      <MinimapViewRay
+        syncState={syncState}
+        markerColor={markerColor}
+        layoutConfig={layoutConfig}
+        positionMarker={positionMarker}
+      />
     </>
   );
 }
@@ -320,19 +503,45 @@ function MapPinIcon({ color }: { color: string }) {
 export function EmotionMinimap({
   syncState,
   uiTheme,
+  layout = 'cube',
+  positionMarker,
   active = false,
   onClick,
 }: EmotionMinimapProps) {
+  const layoutConfig = useMemo(() => getMinimapLayoutConfig(layout), [layout]);
+  // Layer02 では選択星上、それ以外の望遠鏡俯瞰ではカメラ位置
+  const resolvedPositionMarker =
+    positionMarker ??
+    (layout === 'galaxy-ring'
+      ? syncState?.relatedLinkBasicId
+        ? 'focus'
+        : 'camera'
+      : 'focus');
   const positionInfo = useMemo(() => {
-    if (!syncState?.focusPosition || !syncState.primaryId) {
+    if (!syncState) {
       return null;
     }
+
+    const coordinatePosition =
+      resolvedPositionMarker === 'camera' ? syncState.cameraPosition : syncState.focusPosition;
+
+    if (!coordinatePosition || !syncState.primaryId) {
+      return null;
+    }
+
     return getEmotionPositionInfo(
-      syncState.focusPosition,
+      coordinatePosition,
       syncState.primaryId,
       syncState.primaryLabel,
     );
-  }, [syncState?.focusPosition, syncState?.primaryId, syncState?.primaryLabel]);
+  }, [
+    syncState,
+    resolvedPositionMarker,
+    syncState?.cameraPosition,
+    syncState?.focusPosition,
+    syncState?.primaryId,
+    syncState?.primaryLabel,
+  ]);
 
   return (
     <div
@@ -421,7 +630,7 @@ export function EmotionMinimap({
               }}
             >
               <Canvas
-                camera={{ position: MINIMAP_DEFAULT_CAMERA, fov: 36, near: 0.05, far: 20 }}
+                camera={{ position: layoutConfig.defaultCamera, fov: 36, near: 0.05, far: 20 }}
                 dpr={[1, 1.5]}
                 gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }}
                 style={{ width: '100%', height: '100%', background: 'transparent' }}
@@ -429,7 +638,14 @@ export function EmotionMinimap({
                   gl.setClearColor(0x000000, 0);
                 }}
               >
-                <MinimapScene syncState={syncState} holoColor={uiTheme.holoPrimary} markerColor={uiTheme.markerColor} />
+                <MinimapScene
+                  syncState={syncState}
+                  holoColor={uiTheme.holoPrimary}
+                  markerColor={uiTheme.markerColor}
+                  layoutConfig={layoutConfig}
+                  positionMarker={resolvedPositionMarker}
+                  galaxyRing={layout === 'galaxy-ring'}
+                />
               </Canvas>
 
               <div

@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import type { BasicEmotionId } from '../../data/emotions';
 import { getDyadsContainingBasic } from '../../data/emotions';
 import {
@@ -67,10 +68,46 @@ export function getRelatedFocusNodeIds(basicId: BasicEmotionId): Set<string> {
   return ids;
 }
 
+/** 選択基本感情と合成感情を持つ相手の基本感情 ID */
+export function getDyadPartnerBasicIds(basicId: BasicEmotionId): BasicEmotionId[] {
+  const partners = new Set<BasicEmotionId>();
+  for (const dyad of getDyadsContainingBasic(basicId)) {
+    if (dyad.distance > TELESCOPE_FOCUS_VIEW.relatedMaxDistance) {
+      continue;
+    }
+    const partner =
+      dyad.components[0] === basicId ? dyad.components[1] : dyad.components[0];
+    partners.add(partner);
+  }
+  return [...partners];
+}
+
 /**
  * 環中央と選択感情の延長線上付近にカメラを置き、
  * 注視点（回転中心）は選択球そのもの。
  */
+/**
+ * 銀河俯瞰の現在ポーズから、注視点・アングルを保ったまま後退したポーズ。
+ */
+export function computeSurveyPullbackPose(
+  from: TelescopeFocusCameraPose,
+  distanceMul: number,
+): TelescopeFocusCameraPose {
+  const lookAt = new THREE.Vector3(...from.lookAt);
+  const position = new THREE.Vector3(...from.position);
+  const offset = position.clone().sub(lookAt);
+  if (offset.lengthSq() < 1e-8) {
+    offset.set(0, 0, -1);
+  }
+  const distance = offset.length() * distanceMul;
+  offset.normalize().multiplyScalar(distance);
+  const pulled = lookAt.clone().add(offset);
+  return {
+    position: [pulled.x, pulled.y, pulled.z],
+    lookAt: from.lookAt,
+  };
+}
+
 export function computeFocusCameraPose(
   basicId: BasicEmotionId,
 ): TelescopeFocusCameraPose {

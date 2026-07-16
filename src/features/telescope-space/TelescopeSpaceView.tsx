@@ -1,7 +1,14 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { BasicEmotionId } from '../../data/emotions';
+import type { BasicEmotionId, EmotionId } from '../../data/emotions';
+import { EmotionMinimap } from '../../components/EmotionMinimap';
 import { ROUTES } from '../../routes/paths';
+import { getPrimaryEmotionColor } from '../../utils/emotionPlotBridge';
+import {
+  DEFAULT_EMOTION_UI_ACCENT,
+  getEmotionUiTheme,
+} from '../../utils/emotionUiTheme';
+import type { MinimapSyncState } from '../../utils/emotionMinimapLayout';
 import type { TelescopeSettledPhase, TelescopeZoomPhase } from './constants';
 import { TelescopeEyepiece } from './TelescopeEyepiece';
 import {
@@ -82,6 +89,7 @@ export function TelescopeSpaceView() {
   const [zoomPhase, setZoomPhase] = useState<TelescopeZoomPhase>('far');
   const [viewFocus, setViewFocus] = useState<TelescopeViewFocus>(EMPTY_FOCUS);
   const [focusBasicId, setFocusBasicId] = useState<BasicEmotionId | null>(null);
+  const [minimapSync, setMinimapSync] = useState<MinimapSyncState | null>(null);
   const retreatTargetRef = useRef<TelescopeSettledPhase | null>(null);
 
   const busy = isBusyPhase(zoomPhase);
@@ -90,6 +98,14 @@ export function TelescopeSpaceView() {
   const aperture = useMemo(() => apertureForPhase(zoomPhase), [zoomPhase]);
   const showHud = true;
   const showRimGlow = settled !== 'far';
+
+  const minimapAccentId = (focusBasicId ?? viewFocus.nearest?.id ?? null) as EmotionId | null;
+  const minimapUiTheme = useMemo(() => {
+    const accent = minimapAccentId
+      ? getPrimaryEmotionColor(minimapAccentId)
+      : DEFAULT_EMOTION_UI_ACCENT;
+    return getEmotionUiTheme(accent, 'dark');
+  }, [minimapAccentId]);
 
   const startZoomOutStep = useCallback((from: TelescopeSettledPhase) => {
     if (from === 'detail') {
@@ -155,6 +171,10 @@ export function TelescopeSpaceView() {
     setViewFocus(focus);
   }, []);
 
+  const handleMinimapSync = useCallback((state: MinimapSyncState | null) => {
+    setMinimapSync(state);
+  }, []);
+
   return (
     <div
       style={{
@@ -202,9 +222,11 @@ export function TelescopeSpaceView() {
         <TelescopeSpaceCanvas
           zoomPhase={zoomPhase}
           focusBasicId={focusBasicId}
+          viewFocus={viewFocus}
           onZoomComplete={handleZoomComplete}
           onCanvasClickZoom={handleCanvasClickZoom}
           onViewFocus={handleViewFocus}
+          onMinimapSync={handleMinimapSync}
         />
       </TelescopeEyepiece>
 
@@ -213,16 +235,18 @@ export function TelescopeSpaceView() {
           position: 'absolute',
           top: 20,
           left: 20,
-          right: 20,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 16,
-          pointerEvents: 'none',
           zIndex: 2,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          pointerEvents: 'none',
         }}
       >
-        <div style={{ maxWidth: 400, pointerEvents: 'none' }}>
+        <div style={{ pointerEvents: 'none' }}>
+          <EmotionMinimap syncState={minimapSync} uiTheme={minimapUiTheme} layout="galaxy-ring" />
+        </div>
+
+        <div style={{ maxWidth: 400 }}>
           <p
             style={{
               margin: 0,
@@ -254,8 +278,19 @@ export function TelescopeSpaceView() {
             {copy.body}
           </p>
         </div>
+      </div>
 
-        <div style={{ display: 'flex', gap: 10, pointerEvents: 'auto' }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: 20,
+          right: 20,
+          zIndex: 2,
+          display: 'flex',
+          gap: 10,
+          pointerEvents: 'auto',
+        }}
+      >
           <Link
             to={ROUTES.home}
             style={{
@@ -288,7 +323,6 @@ export function TelescopeSpaceView() {
           >
             既存MAP
           </Link>
-        </div>
       </div>
 
       <div

@@ -13,7 +13,6 @@ interface TelescopeEyepieceHudProps {
 const LABEL_TRACK_RADIUS = 0.38;
 /** ふち光の SVG 半径（viewBox 100 基準） */
 const RIM_R = 49.2;
-const RIM_C = 2 * Math.PI * RIM_R;
 const RIM_FADE_MS = 420;
 
 const ORBIT_STYLE_ID = 'telescope-label-orbit-style';
@@ -52,7 +51,8 @@ export function TelescopeInnerTrackLabel({
 
   const emotion = focus.nearest;
   const idle = !emotion;
-  const trackSize = `${LABEL_TRACK_RADIUS * 200}%`;
+  const trackRadius = idle ? LABEL_TRACK_RADIUS : LABEL_TRACK_RADIUS * 0.72;
+  const trackSize = `${trackRadius * 200}%`;
   const trackColor = emotion?.color ?? '#ffffff';
   const labelText = emotion?.label ?? 'Click';
   const labelColor = emotion?.color ?? '#ffffff';
@@ -77,8 +77,8 @@ export function TelescopeInnerTrackLabel({
           top: '50%',
           width: trackSize,
           height: trackSize,
-          marginLeft: `-${LABEL_TRACK_RADIUS * 100}%`,
-          marginTop: `-${LABEL_TRACK_RADIUS * 100}%`,
+          marginLeft: `-${trackRadius * 100}%`,
+          marginTop: `-${trackRadius * 100}%`,
           animation: 'telescope-label-orbit 28s linear infinite',
         }}
       >
@@ -130,6 +130,52 @@ function TrackCircle({
   color: string;
   thin?: boolean;
 }) {
+  if (!thin) {
+    return (
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          width: size,
+          height: size,
+          transform: 'translate(-50%, -50%)',
+          borderRadius: '50%',
+          border: `1.5px solid ${color}`,
+          opacity: 0.85,
+          boxShadow: `0 0 10px ${color}44, inset 0 0 12px ${color}22`,
+          transition: 'border-color 0.35s ease, box-shadow 0.35s ease, opacity 0.35s ease',
+        }}
+      >
+        <svg
+          viewBox="0 0 100 100"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            overflow: 'visible',
+          }}
+        >
+          <circle
+            cx="50"
+            cy="50"
+            r="12.5"
+            fill="none"
+            stroke={color}
+            strokeWidth="0.55"
+            strokeOpacity="0.16"
+          />
+          <line x1="50" y1="32" x2="50" y2="43" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
+          <line x1="50" y1="57" x2="50" y2="68" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
+          <line x1="32" y1="50" x2="43" y2="50" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
+          <line x1="57" y1="50" x2="68" y2="50" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
+        </svg>
+      </div>
+    );
+  }
+
   return (
     <div
       aria-hidden
@@ -159,7 +205,7 @@ interface GlowRenderState extends TelescopeNearbyEmotionGlow {
 }
 
 /**
- * 穴の外の近い感情の方位をふちの色光で示す。
+ * 穴の外の近い感情の方位を、円周上の内向きバーで示す。
  * 画面内の球は大きめに広がり、ラベル対象になると消える。フェードイン/アウトあり。
  */
 export function TelescopeRimColorGlow({
@@ -265,10 +311,12 @@ export function TelescopeRimColorGlow({
       aria-hidden
     >
       <defs>
-        <filter id="telescope-rim-glow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="1.6" result="blur" />
+        <filter id="telescope-rim-glow" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="2.8" result="blurWide" />
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="blurTight" />
           <feMerge>
-            <feMergeNode in="blur" />
+            <feMergeNode in="blurWide" />
+            <feMergeNode in="blurTight" />
             <feMergeNode in="SourceGraphic" />
           </feMerge>
         </filter>
@@ -284,45 +332,88 @@ export function TelescopeRimColorGlow({
       />
 
       {glows.map((sample) => {
-        const rotDeg = (-sample.angle * 180) / Math.PI;
-        const spread = sample.onScreen ? 1.55 : 1;
-        const arcFrac = (0.055 + sample.weight * 0.09) * spread;
-        const dash = arcFrac * RIM_C;
-        const gap = RIM_C - dash;
-        const dashOffset = dash / 2;
-        const widthBoost = sample.onScreen ? 1.7 : 1;
+        // `angle` は NDC 上で 0=右, 反時計回り, Y-up。
+        // SVG 回転は 0=上配置の基準線を時計回りに回すので変換する。
+        const rotDeg = 90 - (sample.angle * 180) / Math.PI;
+        const spread = sample.onScreen ? 1.18 : 1;
+        const barLen = (2.4 + sample.weight * 4.8) * spread;
+        const arcSpreadDeg = (0.7 + sample.weight * 1.05) * spread;
+        const maxBars = 21; // 現在(14)の 1.5倍
+        const minBars = 10;
+        // weight が大きいほど「近い」想定 → 本数を増やす
+        const closenessT = Math.max(0, Math.min(1, sample.weight));
+        let barCount = Math.round(minBars + closenessT * (maxBars - minBars));
+        // 扇の中心で対称になるように奇数に丸める
+        if (barCount % 2 === 0) {
+          barCount += 1;
+        }
+        barCount = Math.min(maxBars, barCount);
+        const widthBoost = sample.onScreen ? 1.28 : 1;
+        const strokeW = (0.34 + sample.weight * 0.4) * widthBoost;
+        const groupOpacity = sample.opacity;
+        const baseBarOpacity = 0.78 + sample.weight * 0.22;
+        const centerIndex = (barCount - 1) / 2;
+        const maxCenterDist = Math.max(centerIndex, 1);
+
+        const barOffsets = Array.from(
+          { length: barCount },
+          (_, i) => (i - centerIndex) * arcSpreadDeg,
+        );
 
         return (
           <g
             key={sample.id}
             transform={`rotate(${rotDeg} 50 50)`}
-            opacity={sample.opacity}
+            opacity={groupOpacity}
           >
-            <circle
-              cx="50"
-              cy="50"
-              r={RIM_R}
-              fill="none"
-              stroke={sample.color}
-              strokeWidth={(1.1 + sample.weight * 2.2) * widthBoost}
-              strokeLinecap="round"
-              strokeDasharray={`${dash} ${gap}`}
-              strokeDashoffset={dashOffset}
-              opacity={0.4 + sample.weight * 0.5}
-              filter="url(#telescope-rim-glow)"
-            />
-            <circle
-              cx="50"
-              cy="50"
-              r={RIM_R}
-              fill="none"
-              stroke={sample.color}
-              strokeWidth={(0.65 + sample.weight * 0.85) * widthBoost}
-              strokeLinecap="round"
-              strokeDasharray={`${dash * 0.55} ${RIM_C - dash * 0.55}`}
-              strokeDashoffset={dash * 0.275}
-              opacity={0.75 + sample.weight * 0.25}
-            />
+            {barOffsets.map((offsetDeg, index) => {
+              const distFromCenter = Math.abs(index - centerIndex) / maxCenterDist;
+              const centerWeight = 1 - distFromCenter;
+              const edgeFade = centerWeight * centerWeight;
+              const barOpacity = baseBarOpacity * (0.14 + edgeFade * 0.86);
+              const bentLen = barLen * (1 - distFromCenter * 0.1);
+              const glowLen = bentLen * 1.08;
+              const innerLen = bentLen * 0.62;
+              const startY = 50 - RIM_R - 1.1;
+
+              return (
+              <g key={index} transform={`rotate(${offsetDeg} 50 50)`}>
+                <line
+                  x1="50"
+                  y1={startY}
+                  x2="50"
+                  y2={startY - glowLen}
+                  stroke={sample.color}
+                  strokeWidth={strokeW * 2.8}
+                  strokeLinecap="round"
+                  strokeOpacity={barOpacity * 0.18}
+                  filter="url(#telescope-rim-glow)"
+                />
+                <line
+                  x1="50"
+                  y1={startY}
+                  x2="50"
+                  // 円の外側方向へ伸ばす（中心ではなく外へ）
+                  y2={startY - bentLen}
+                  stroke={sample.color}
+                  strokeWidth={strokeW}
+                  strokeLinecap="round"
+                  strokeOpacity={barOpacity}
+                  filter="url(#telescope-rim-glow)"
+                />
+                <line
+                  x1="50"
+                  y1={startY}
+                  x2="50"
+                  y2={startY - innerLen}
+                  stroke={sample.color}
+                  strokeWidth={strokeW * 0.5}
+                  strokeLinecap="round"
+                  strokeOpacity={barOpacity * 0.72}
+                />
+              </g>
+              );
+            })}
           </g>
         );
       })}
