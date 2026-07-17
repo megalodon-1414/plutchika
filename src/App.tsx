@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { SpaceCanvas } from './components/SpaceCanvas';
 import { EmotionMinimap, MAP_WIDTH } from './components/EmotionMinimap';
 import { ExplorationToolsPanel } from './components/ExplorationToolsPanel';
@@ -28,6 +29,7 @@ import { getPrimaryEmotionColor } from './utils/emotionPlotBridge';
 import { DEFAULT_EMOTION_UI_ACCENT, getEmotionUiTheme } from './utils/emotionUiTheme';
 import { resolvePrimaryEmotionLabel } from './utils/emotionCoordinates';
 import { filterPlotsByTags, getPlotKindLabel, type PlotTagId } from './utils/plotTags';
+import { getEmotionWordPath } from './utils/emotionWordSlug';
 import { mergeWithSeedPlots } from './utils/seedPlots';
 import type { BasicEmotionId, EmotionId } from './data/emotions';
 import { getBasicEmotion, getEmotionById } from './data/emotions';
@@ -52,6 +54,7 @@ function pickPreferredPlotId(plots: UserPlotRow[]): string | null {
 }
 
 function App() {
+  const navigate = useNavigate();
   const mainRef = useRef<HTMLElement>(null);
   const [plots, setPlots] = useState<UserPlotRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -76,6 +79,7 @@ function App() {
   const [hierarchyConfirmedBasicId, setHierarchyConfirmedBasicId] = useState<BasicEmotionId | null>(null);
   const [hierarchyFrontDyadId, setHierarchyFrontDyadId] = useState<EmotionId | null>(null);
   const [hierarchyConfirmedDyadId, setHierarchyConfirmedDyadId] = useState<EmotionId | null>(null);
+  const [hierarchyFrontWordKey, setHierarchyFrontWordKey] = useState<string | null>(null);
   const [spaceOverview, setSpaceOverview] = useState(false);
   const [spaceOverviewFocusId, setSpaceOverviewFocusId] = useState<EmotionId | null>(null);
   const [overviewHoveredEmotionId, setOverviewHoveredEmotionId] = useState<EmotionId | null>(null);
@@ -230,6 +234,11 @@ function App() {
   const selectedPlot = useMemo(
     () => findPlotByKey(displayPlots, selectedId),
     [displayPlots, selectedId],
+  );
+
+  const hierarchyFrontWordPlot = useMemo(
+    () => findPlotByKey(displayPlots, hierarchyFrontWordKey),
+    [displayPlots, hierarchyFrontWordKey],
   );
 
   const emotionUiTheme = useMemo(() => {
@@ -540,6 +549,10 @@ function App() {
     setHierarchyConfirmedDyadId((prev) => (prev && prev !== id ? null : prev));
   }, []);
 
+  const handleHierarchyFrontWordChange = useCallback((key: string | null) => {
+    setHierarchyFrontWordKey(key);
+  }, []);
+
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setFlowLabelNow(Date.now());
@@ -817,6 +830,7 @@ function App() {
           hierarchyConfirmedDyadId={hierarchyConfirmedDyadId}
           onHierarchyFrontBasicChange={handleHierarchyFrontBasicChange}
           onHierarchyFrontDyadChange={handleHierarchyFrontDyadChange}
+          onHierarchyFrontWordChange={handleHierarchyFrontWordChange}
           flowLabelExpiresAt={flowLabelExpiresAt}
           flowLabelNow={flowLabelNow}
           plotLabelDisplayMode={plotLabelDisplayMode}
@@ -862,31 +876,63 @@ function App() {
               }}
             >
               {hierarchyConfirmedDyadId
-                ? `${getEmotionById(hierarchyConfirmedDyadId).label} の単語 · 押すと手前へ`
+                ? `${getEmotionById(hierarchyConfirmedDyadId).label} の単語 · 押すと手前へ · 決定で詳細へ`
                 : hierarchyConfirmedBasicId
                   ? `${getBasicEmotion(hierarchyConfirmedBasicId).label} の合成感情 · 押すと手前へ`
                   : `手前: ${getBasicEmotion(hierarchyFrontBasicId).label} · ほかを押すと回転`}
             </div>
             <div style={{ display: 'flex', gap: '10px', pointerEvents: 'auto' }}>
               {hierarchyConfirmedDyadId ? (
-                <button
-                  type="button"
-                  onClick={() => setHierarchyConfirmedDyadId(null)}
-                  style={{
-                    padding: '12px 22px',
-                    borderRadius: '999px',
-                    border: `1px solid ${emotionUiTheme.controlBorder}`,
-                    backgroundColor: emotionUiTheme.controlBackground,
-                    color: emotionUiTheme.controlText,
-                    fontSize: '0.9rem',
-                    letterSpacing: '0.1em',
-                    cursor: 'pointer',
-                    backdropFilter: 'blur(10px)',
-                    transition: UI_COLOR_TRANSITION,
-                  }}
-                >
-                  戻る
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHierarchyConfirmedDyadId(null);
+                      setHierarchyFrontWordKey(null);
+                    }}
+                    style={{
+                      padding: '12px 22px',
+                      borderRadius: '999px',
+                      border: `1px solid ${emotionUiTheme.controlBorder}`,
+                      backgroundColor: emotionUiTheme.controlBackground,
+                      color: emotionUiTheme.controlText,
+                      fontSize: '0.9rem',
+                      letterSpacing: '0.1em',
+                      cursor: 'pointer',
+                      backdropFilter: 'blur(10px)',
+                      transition: UI_COLOR_TRANSITION,
+                    }}
+                  >
+                    戻る
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!hierarchyFrontWordPlot}
+                    onClick={() => {
+                      if (!hierarchyFrontWordPlot) {
+                        return;
+                      }
+                      navigate(getEmotionWordPath(hierarchyFrontWordPlot));
+                    }}
+                    style={{
+                      padding: '12px 28px',
+                      borderRadius: '999px',
+                      border: `1px solid ${emotionUiTheme.accentBorderStrong}`,
+                      backgroundColor: emotionUiTheme.panelBackground,
+                      color: emotionUiTheme.textPrimary,
+                      fontSize: '0.95rem',
+                      letterSpacing: '0.14em',
+                      fontWeight: 700,
+                      cursor: hierarchyFrontWordPlot ? 'pointer' : 'default',
+                      opacity: hierarchyFrontWordPlot ? 1 : 0.5,
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: `0 0 0 1px ${emotionUiTheme.accentBorder}, 0 8px 24px rgba(0,0,0,0.35)`,
+                      transition: UI_COLOR_TRANSITION,
+                    }}
+                  >
+                    決定 · {hierarchyFrontWordPlot?.word_id ?? '単語'}
+                  </button>
+                </>
               ) : hierarchyConfirmedBasicId ? (
                 <>
                   <button

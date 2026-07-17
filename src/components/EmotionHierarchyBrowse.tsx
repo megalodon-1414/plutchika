@@ -50,6 +50,7 @@ interface EmotionHierarchyBrowseProps {
   plots?: UserPlotRow[];
   onFrontBasicChange?: (id: BasicEmotionId) => void;
   onFrontDyadChange?: (id: EmotionId) => void;
+  onFrontWordChange?: (key: string | null) => void;
 }
 
 function OrbitHintRing({
@@ -476,6 +477,7 @@ export function EmotionHierarchyBrowse({
   plots = [],
   onFrontBasicChange,
   onFrontDyadChange,
+  onFrontWordChange,
 }: EmotionHierarchyBrowseProps) {
   const basics = useMemo(() => getHierarchyBasicCenters(), []);
   const spinGroupRef = useRef<THREE.Group>(null);
@@ -551,6 +553,12 @@ export function EmotionHierarchyBrowse({
 
   const onFrontDyadChangeRef = useRef(onFrontDyadChange);
   onFrontDyadChangeRef.current = onFrontDyadChange;
+  const onFrontWordChangeRef = useRef(onFrontWordChange);
+  onFrontWordChangeRef.current = onFrontWordChange;
+
+  useEffect(() => {
+    onFrontWordChangeRef.current?.(frontWordKey);
+  }, [frontWordKey]);
 
   useEffect(() => {
     spinTargetRef.current = getHierarchySpinForBasic(frontBasicId);

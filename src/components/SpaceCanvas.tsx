@@ -98,6 +98,7 @@ interface SpaceCanvasProps {
   hierarchyScreenAnchor?: { x: number; y: number };
   onHierarchyFrontBasicChange?: (id: BasicEmotionId) => void;
   onHierarchyFrontDyadChange?: (id: EmotionId) => void;
+  onHierarchyFrontWordChange?: (key: string | null) => void;
   flowLabelExpiresAt?: Readonly<Record<string, number>>;
   flowLabelNow?: number;
   plotLabelDisplayMode?: PlotLabelDisplayMode;
@@ -812,6 +813,7 @@ export function SpaceCanvas({
   hierarchyScreenAnchor = HIERARCHY_SCREEN_ANCHOR,
   onHierarchyFrontBasicChange,
   onHierarchyFrontDyadChange,
+  onHierarchyFrontWordChange,
   flowLabelExpiresAt,
   flowLabelNow = 0,
   plotLabelDisplayMode = 'flow',
@@ -1213,6 +1215,7 @@ export function SpaceCanvas({
               plots={plots}
               onFrontBasicChange={onHierarchyFrontBasicChange}
               onFrontDyadChange={onHierarchyFrontDyadChange}
+              onFrontWordChange={onHierarchyFrontWordChange}
             />
           )}
           {!hierarchyBrowse && spaceOverview && (
