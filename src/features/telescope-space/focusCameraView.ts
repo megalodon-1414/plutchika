@@ -10,20 +10,21 @@ import {
 /**
  * 3段階目カメラ視点 — ここを触って調整する。
  *
- * 環中央 → 選択感情の延長線上付近へ一気に移動し、
- * 回転中心は選択球。画面の上下は常に環平面の法線（+Z）方向。
+ * 選択感情の延長線上・環平面付近にカメラを置き、平面法線(+Z)を画面上にする。
+ * 視線は選択感情方向（正面）。回転中心はカメラ自身。
  *
  * - `radialScale`: 環半径に対するカメラ距離（大きいほど引いた視点）
- * - `zLift`: 環平面から手前(+Z)へ浮かせて立体角をつける
- * - `focusDrop`: 焦点（注視点）を平面法線の下方向へずらす量
- * - `moveMs`: 延長線上への移動時間（短いほど「いっきに」）
- * - `orbitYawMax`: 詳細時の横回転限界（rad）
- * - `orbitPitchMax`: 詳細時の縦回転限界（rad）
+ * - `zLift`: 環平面から手前(+Z)へわずかに浮かせる量
+ * - `focusDrop`: 注視点の Z ずらし（+で平面法線マイナス側）
+ * - `fov`: レイヤー2到着時に適用する画角
+ * - `moveMs`: 延長線上への移動時間
+ * - `orbitYawMax` / `orbitPitchMax`: 見回し限界（rad）
  */
 export const TELESCOPE_FOCUS_VIEW = {
-  radialScale: 2.2,
-  zLift: 1.85,
-  focusDrop: -0.42,
+  radialScale: 1.5,
+  zLift: 0.8,
+  focusDrop: 0,
+  fov: 38,
   moveMs: 720,
   orbitYawMax: 1.05,
   orbitPitchMax: 0.38,
@@ -32,13 +33,13 @@ export const TELESCOPE_FOCUS_VIEW = {
   includePartnerBasics: true,
 } as const;
 
-/** 環平面に対する「上」（どの感情でも画面上下をこれに揃える） */
+/** レイヤー2の画面上方向＝環平面の法線（水平に見回すための安定 up） */
 export const TELESCOPE_FOCUS_PLANE_UP: [number, number, number] = [0, 0, 1];
 
 export interface TelescopeFocusCameraPose {
-  /** カメラ位置（延長線上付近） */
+  /** カメラ位置＝回転中心 */
   position: [number, number, number];
-  /** 回転中心＝選択した感情球 */
+  /** 基準の注視点（選択感情）。見回しはこの方向を起点に回転する */
   lookAt: [number, number, number];
 }
 
@@ -83,10 +84,6 @@ export function getDyadPartnerBasicIds(basicId: BasicEmotionId): BasicEmotionId[
 }
 
 /**
- * 環中央と選択感情の延長線上付近にカメラを置き、
- * 注視点（回転中心）は選択球そのもの。
- */
-/**
  * 銀河俯瞰の現在ポーズから、注視点・アングルを保ったまま後退したポーズ。
  */
 export function computeSurveyPullbackPose(
@@ -127,11 +124,11 @@ export function computeFocusCameraPose(
     uz * radial + TELESCOPE_FOCUS_VIEW.zLift,
   ];
 
-  // 焦点＝選択球より少し下（平面法線 -Z）
+  // Layer2到着時の初期注視点＝8感情環の中心。
   const lookAt: [number, number, number] = [
-    ex,
-    ey,
-    ez - TELESCOPE_FOCUS_VIEW.focusDrop,
+    0,
+    0,
+    -TELESCOPE_FOCUS_VIEW.focusDrop,
   ];
 
   return { position, lookAt };

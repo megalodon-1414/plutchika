@@ -3,11 +3,22 @@ import { getEmotionFaceAtAngle } from '../utils/emotionFace';
 interface EmotionFaceIconProps {
   angle: number;
   size?: number;
+  color?: string;
+  showLabel?: boolean;
+  simplifiedEyes?: boolean;
 }
 
-export function EmotionFaceIcon({ angle, size = 56 }: EmotionFaceIconProps) {
+export function EmotionFaceIcon({
+  angle,
+  size = 56,
+  color = '#45f3ff',
+  showLabel = true,
+  simplifiedEyes = false,
+}: EmotionFaceIconProps) {
   const face = getEmotionFaceAtAngle(angle);
   const normalized = ((angle % 360) + 360) % 360;
+  const isJoyEmotion =
+    simplifiedEyes && (normalized < 10 || normalized > 350);
   const blend = (normalized % 45) / 45;
   const label =
     blend < 0.12 ? face.label : blend > 0.88 ? face.nextLabel : `${face.label}〜${face.nextLabel}`;
@@ -27,50 +38,83 @@ export function EmotionFaceIcon({ angle, size = 56 }: EmotionFaceIconProps) {
   const mouthOpenW = 6 + face.mouthOpen * 10;
   const pupilOffsetY =
     Math.sign(face.pupilY) * Math.min(Math.abs(face.pupilY), eyeRy * 0.75);
+  const featureStrokeWidth = simplifiedEyes ? 3.4 : 2.5;
+  const featureColor = simplifiedEyes ? color : '#e5e7eb';
+  const useRoundEyes = face.eyeHeight >= 0.46;
+  const browOuterY = browY + outerLift;
+  const browInnerY = browY + innerTiltOffset;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
       <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true">
-        <circle cx="50" cy="50" r="46" fill="#0b0c10" stroke="#45f3ff" strokeWidth="2" />
-        <circle cx="50" cy="50" r="44" fill="none" stroke="#1f2833" strokeWidth="1" />
+        <circle cx="50" cy="50" r="46" fill="#0b0c10" stroke={color} strokeWidth={simplifiedEyes ? 3 : 2} />
+        <circle cx="50" cy="50" r="44" fill="none" stroke="#1f2833" strokeWidth={simplifiedEyes ? 1.5 : 1} />
 
         <line
           x1={leftEyeX - browLen}
-          y1={browY + outerLift}
+          y1={browOuterY}
           x2={leftEyeX + 5}
-          y2={browY + innerTiltOffset}
-          stroke="#e5e7eb"
-          strokeWidth="2.5"
+          y2={browInnerY}
+          stroke={featureColor}
+          strokeWidth={featureStrokeWidth}
           strokeLinecap="round"
         />
         <line
           x1={rightEyeX + browLen}
-          y1={browY + outerLift}
+          y1={browOuterY}
           x2={rightEyeX - 5}
-          y2={browY + innerTiltOffset}
-          stroke="#e5e7eb"
-          strokeWidth="2.5"
+          y2={browInnerY}
+          stroke={featureColor}
+          strokeWidth={featureStrokeWidth}
           strokeLinecap="round"
         />
 
-        <ellipse cx={leftEyeX} cy={eyeY} rx={eyeRx} ry={eyeRy} fill="#e5e7eb" />
-        <ellipse cx={rightEyeX} cy={eyeY} rx={eyeRx} ry={eyeRy} fill="#e5e7eb" />
-        <circle cx={leftEyeX} cy={eyeY + pupilOffsetY} r={2.8} fill="#0b0c10" />
-        <circle cx={rightEyeX} cy={eyeY + pupilOffsetY} r={2.8} fill="#0b0c10" />
+        {simplifiedEyes ? (
+          useRoundEyes ? (
+            <>
+              <circle cx={leftEyeX} cy={eyeY} r={Math.max(5.5, eyeRy * 0.8)} fill="none" stroke={featureColor} strokeWidth={featureStrokeWidth} />
+              <circle cx={rightEyeX} cy={eyeY} r={Math.max(5.5, eyeRy * 0.8)} fill="none" stroke={featureColor} strokeWidth={featureStrokeWidth} />
+            </>
+          ) : (
+            <>
+              <line x1={leftEyeX - eyeRx} y1={eyeY} x2={leftEyeX + eyeRx} y2={eyeY} stroke={featureColor} strokeWidth={featureStrokeWidth} strokeLinecap="round" />
+              <line x1={rightEyeX - eyeRx} y1={eyeY} x2={rightEyeX + eyeRx} y2={eyeY} stroke={featureColor} strokeWidth={featureStrokeWidth} strokeLinecap="round" />
+            </>
+          )
+        ) : (
+          <>
+            <ellipse cx={leftEyeX} cy={eyeY} rx={eyeRx} ry={eyeRy} fill="#e5e7eb" />
+            <ellipse cx={rightEyeX} cy={eyeY} rx={eyeRx} ry={eyeRy} fill="#e5e7eb" />
+            <circle cx={leftEyeX} cy={eyeY + pupilOffsetY} r={2.8} fill="#0b0c10" />
+            <circle cx={rightEyeX} cy={eyeY + pupilOffsetY} r={2.8} fill="#0b0c10" />
+          </>
+        )}
 
-        {face.mouthOpen > 0.35 ? (
-          <ellipse cx="50" cy={mouthY} rx={mouthOpenW} ry={mouthOpenH} fill="none" stroke="#e5e7eb" strokeWidth="2.5" />
+        {isJoyEmotion ? (
+          <path
+            d="M 34 62 L 66 62 Q 50 84 34 62 Z"
+            fill="none"
+            stroke={featureColor}
+            strokeWidth={featureStrokeWidth}
+            strokeLinejoin="round"
+          />
+        ) : face.mouthOpen > 0.35 ? (
+          <ellipse cx="50" cy={mouthY} rx={mouthOpenW} ry={mouthOpenH} fill="none" stroke={featureColor} strokeWidth={featureStrokeWidth} />
         ) : (
           <path
             d={`M ${50 - 14} ${mouthY} Q 50 ${mouthY + mouthCurve} ${50 + 14} ${mouthY}`}
             fill="none"
-            stroke="#e5e7eb"
-            strokeWidth="2.5"
+            stroke={featureColor}
+            strokeWidth={featureStrokeWidth}
             strokeLinecap="round"
           />
         )}
       </svg>
-      <span style={{ fontSize: '0.7rem', color: '#9ca3af', lineHeight: 1 }}>{label}</span>
+      {showLabel ? (
+        <span style={{ fontSize: '0.7rem', color: '#9ca3af', lineHeight: 1 }}>
+          {label}
+        </span>
+      ) : null}
     </div>
   );
 }

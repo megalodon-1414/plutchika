@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getEmotionById, type EmotionId } from '../../data/emotions';
 import type {
   TelescopeNearbyEmotionGlow,
   TelescopeViewFocus,
@@ -7,56 +8,93 @@ import type {
 interface TelescopeEyepieceHudProps {
   focus: TelescopeViewFocus;
   visible: boolean;
+  detailMode?: boolean;
+  selectedEmotion?: { label: string; color: string } | null;
 }
 
 /** 内側ラベル軌道の半径（接眼直径に対する割合） */
 const LABEL_TRACK_RADIUS = 0.38;
-/** ふち光の SVG 半径（viewBox 100 基準） */
-const RIM_R = 49.2;
-const RIM_FADE_MS = 420;
+const LAYER1_TRACK_SCALE = 0.72 * 0.9;
+const LAYER2_TRACK_SCALE = 0.84 * 1.2 * 1.15;
+const LAYER1_TRACK_CENTER_Y = 0.5;
+const LAYER2_TRACK_CENTER_Y = 1.2;
+const TRACK_LAYOUT_TRANSITION =
+  'top 720ms cubic-bezier(0.22, 0.61, 0.36, 1), width 720ms cubic-bezier(0.22, 0.61, 0.36, 1), height 720ms cubic-bezier(0.22, 0.61, 0.36, 1)';
 
-const ORBIT_STYLE_ID = 'telescope-label-orbit-style';
-
-function ensureOrbitKeyframes() {
-  if (typeof document === 'undefined') {
-    return;
-  }
-  if (document.getElementById(ORBIT_STYLE_ID)) {
-    return;
-  }
-  const style = document.createElement('style');
-  style.id = ORBIT_STYLE_ID;
-  style.textContent = `
-    @keyframes telescope-label-orbit {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-  `;
-  document.head.appendChild(style);
+function getEmotionLabel(id: string): string {
+  return getEmotionById(id as EmotionId).label;
 }
 
 /**
- * 穴の内側の円周上をラベルが周回する。
- * 初期／未検知時は白線 +「Click」。検知時は感情色 + 感情名。
+ * 未検知時も同じ位置に白い円を表示し、検知時は感情色の円と中央下のラベルに切り替える。
+ * 上部ラベル枠（今の気持ちは／の方向・の中でも）は非検知時も常時表示し、検知名だけ空白にする。
  */
 export function TelescopeInnerTrackLabel({
   focus,
   visible,
+  detailMode = false,
+  selectedEmotion = null,
 }: TelescopeEyepieceHudProps) {
+  const emotion = focus.nearest;
+  const [detectionShown, setDetectionShown] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !emotion) {
+      setDetectionShown(false);
+      return;
+    }
+    setDetectionShown(false);
+    const enterFrame = requestAnimationFrame(() => {
+      setDetectionShown(true);
+    });
+    return () => cancelAnimationFrame(enterFrame);
+  }, [emotion?.id, visible]);
+
   if (!visible) {
     return null;
   }
 
-  ensureOrbitKeyframes();
-
-  const emotion = focus.nearest;
   const idle = !emotion;
-  const trackRadius = idle ? LABEL_TRACK_RADIUS : LABEL_TRACK_RADIUS * 0.72;
+  const trackRadius =
+    LABEL_TRACK_RADIUS *
+    (detailMode ? LAYER2_TRACK_SCALE : LAYER1_TRACK_SCALE);
+  const trackCenterY = detailMode
+    ? LAYER2_TRACK_CENTER_Y
+    : LAYER1_TRACK_CENTER_Y;
   const trackSize = `${trackRadius * 200}%`;
   const trackColor = emotion?.color ?? '#ffffff';
-  const labelText = emotion?.label ?? 'Click';
-  const labelColor = emotion?.color ?? '#ffffff';
   const idleOpacity = idle ? 0.42 : 1;
+  const rawColorSources = [
+    ...(emotion
+      ? [{ color: emotion.color, angle: emotion.angle, weight: 1, center: true }]
+      : []),
+    ...focus.nearby.slice(0, 4).map((sample) => ({
+      color: sample.color,
+      angle: sample.angle,
+      weight: sample.weight,
+      center: false,
+    })),
+  ];
+  const fallbackSource = rawColorSources.at(-1) ?? {
+    color: '#ffffff',
+    angle: 0,
+    weight: 0,
+    center: true,
+  };
+  // スロット数を固定し、色源が入れ替わっても同じSVG要素上で補間させる。
+  const centerColorSources = Array.from({ length: 5 }, (_, index) => {
+    const source = rawColorSources[index] ?? fallbackSource;
+    return { ...source, active: index < rawColorSources.length };
+  });
+
+  const primaryLabel =
+    detailMode && selectedEmotion ? selectedEmotion.label : emotion?.label ?? '';
+  const primaryColor =
+    detailMode && selectedEmotion
+      ? selectedEmotion.color
+      : emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
+  const detectionLabel = detailMode ? emotion?.label ?? '' : '';
+  const detectionColor = emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
 
   return (
     <div
@@ -65,57 +103,184 @@ export function TelescopeInnerTrackLabel({
         inset: 0,
         pointerEvents: 'none',
         zIndex: 2,
-        opacity: idleOpacity,
       }}
     >
-      <TrackCircle size={trackSize} color={trackColor} thin={idle} />
+      <div style={{ opacity: idleOpacity, transition: 'opacity 300ms ease' }}>
+        <TrackCircle
+          size={trackSize}
+          centerY={trackCenterY}
+          color={trackColor}
+          thin={idle}
+        />
+
+        <svg
+          viewBox="0 0 24 24"
+          width="32"
+          height="32"
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: detailMode ? '46%' : '50%',
+            transform: detailMode
+              ? 'translate(-50%, -50%) perspective(180px) rotateX(62deg) scale(1.35)'
+              : 'translate(-50%, -50%) perspective(180px) rotateX(0deg) scale(1)',
+            transformOrigin: 'center',
+            transformStyle: 'preserve-3d',
+            overflow: 'visible',
+            filter: `drop-shadow(0 0 4px ${trackColor}66)`,
+            transition:
+              'top 720ms cubic-bezier(0.22, 0.61, 0.36, 1), transform 720ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+          }}
+        >
+        <defs>
+          <clipPath id="telescope-center-star-clip">
+            <path d="M12 1 C12.25 7.6 16.4 11.75 23 12 C16.4 12.25 12.25 16.4 12 23 C11.75 16.4 7.6 12.25 1 12 C7.6 11.75 11.75 7.6 12 1 Z" />
+          </clipPath>
+          <filter
+            id="telescope-center-color-field-blur"
+            x="-80%"
+            y="-80%"
+            width="260%"
+            height="260%"
+          >
+            <feGaussianBlur stdDeviation="4.2" />
+          </filter>
+        </defs>
+        <g clipPath="url(#telescope-center-star-clip)">
+          <rect
+            x="0"
+            y="0"
+            width="24"
+            height="24"
+            style={{
+              fill: fallbackSource.color,
+              opacity: idle ? 0.14 : 0.25,
+              transition: 'fill 950ms ease, opacity 950ms ease',
+            }}
+          />
+          <g filter="url(#telescope-center-color-field-blur)">
+            {centerColorSources.map((source, index) => {
+              const sourceDistance = source.center
+                ? 0
+                : 3.2 + (1 - source.weight) * 6.8;
+              const dx = Math.cos(source.angle) * sourceDistance;
+              const dy = -Math.sin(source.angle) * sourceDistance;
+              // SVGは24単位を32pxで表示しているためCSS移動量へ換算。
+              const cssScale = 32 / 24;
+              return (
+                <g
+                  key={index}
+                  style={{
+                    transform: `translate(${dx * cssScale}px, ${dy * cssScale}px)`,
+                    transition:
+                      'transform 950ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+                  }}
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r={9 + source.weight * 3}
+                    style={{
+                      fill: source.color,
+                      opacity: source.active ? 0.42 : 0,
+                      mixBlendMode: 'normal',
+                      transition:
+                        'fill 950ms ease, opacity 700ms ease, r 950ms ease',
+                    }}
+                  />
+                </g>
+              );
+            })}
+          </g>
+        </g>
+        <path
+          d="M12 1 C12.25 7.6 16.4 11.75 23 12 C16.4 12.25 12.25 16.4 12 23 C11.75 16.4 7.6 12.25 1 12 C7.6 11.75 11.75 7.6 12 1 Z"
+          fill="none"
+          stroke={trackColor}
+          strokeWidth="0.28"
+          strokeOpacity={idle ? 0.22 : 0.38}
+          style={{
+            transition: 'stroke 950ms ease, stroke-opacity 950ms ease',
+          }}
+        />
+      </svg>
+      </div>
 
       <div
+        aria-live="polite"
         style={{
           position: 'absolute',
           left: '50%',
-          top: '50%',
-          width: trackSize,
-          height: trackSize,
-          marginLeft: `-${trackRadius * 100}%`,
-          marginTop: `-${trackRadius * 100}%`,
-          animation: 'telescope-label-orbit 28s linear infinite',
+          top: '6%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 6,
+          opacity: 0.92,
+          pointerEvents: 'none',
         }}
       >
-        <div
+        <span
           style={{
-            position: 'absolute',
-            left: '100%',
-            top: '50%',
-            transform: 'translate(-50%, -50%) rotate(90deg)',
-            color: labelColor,
-            fontSize: idle ? '0.95rem' : '1.12rem',
-            fontWeight: 750,
-            letterSpacing: '0.06em',
+            color: 'rgba(244, 236, 247, 0.72)',
+            fontSize: '0.78rem',
+            fontWeight: 550,
+            letterSpacing: '0.18em',
             whiteSpace: 'nowrap',
-            textAlign: 'center',
           }}
-          aria-live="polite"
         >
-          {labelText}
-        </div>
-        <div
+          今の気持ちは
+        </span>
+        <span
           style={{
-            position: 'absolute',
-            left: '0%',
-            top: '50%',
-            transform: 'translate(-50%, -50%) rotate(-90deg)',
-            color: labelColor,
-            fontSize: idle ? '0.95rem' : '1.12rem',
+            color: primaryColor,
+            fontSize: detailMode ? '1.08rem' : '1.45rem',
             fontWeight: 750,
-            letterSpacing: '0.06em',
+            letterSpacing: '0.14em',
             whiteSpace: 'nowrap',
-            textAlign: 'center',
+            minHeight: detailMode ? '1.2em' : '1.5em',
+            opacity: detailMode
+              ? selectedEmotion
+                ? 1
+                : 0.55
+              : emotion && detectionShown
+                ? 1
+                : 0.55,
+            transition: 'opacity 300ms ease, color 300ms ease',
           }}
-          aria-hidden
         >
-          {labelText}
-        </div>
+          {primaryLabel || '\u00A0'}
+        </span>
+        <span
+          style={{
+            marginTop: -2,
+            color: 'rgba(244, 236, 247, 0.72)',
+            fontSize: '0.78rem',
+            fontWeight: 550,
+            letterSpacing: '0.18em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {detailMode ? 'の中でも' : 'の方向'}
+        </span>
+        {detailMode ? (
+          <span
+            style={{
+              color: detectionColor,
+              fontSize: '1.45rem',
+              fontWeight: 750,
+              letterSpacing: '0.14em',
+              whiteSpace: 'nowrap',
+              minHeight: '1.5em',
+              opacity: emotion && detectionShown ? 1 : 0.55,
+              transition: 'opacity 300ms ease, color 300ms ease',
+            }}
+          >
+            {detectionLabel || '\u00A0'}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -123,66 +288,22 @@ export function TelescopeInnerTrackLabel({
 
 function TrackCircle({
   size,
+  centerY,
   color,
   thin = false,
 }: {
   size: string;
+  centerY: number;
   color: string;
   thin?: boolean;
 }) {
-  if (!thin) {
-    return (
-      <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          left: '50%',
-          top: '50%',
-          width: size,
-          height: size,
-          transform: 'translate(-50%, -50%)',
-          borderRadius: '50%',
-          border: `1.5px solid ${color}`,
-          opacity: 0.85,
-          boxShadow: `0 0 10px ${color}44, inset 0 0 12px ${color}22`,
-          transition: 'border-color 0.35s ease, box-shadow 0.35s ease, opacity 0.35s ease',
-        }}
-      >
-        <svg
-          viewBox="0 0 100 100"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            overflow: 'visible',
-          }}
-        >
-          <circle
-            cx="50"
-            cy="50"
-            r="12.5"
-            fill="none"
-            stroke={color}
-            strokeWidth="0.55"
-            strokeOpacity="0.16"
-          />
-          <line x1="50" y1="32" x2="50" y2="43" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
-          <line x1="50" y1="57" x2="50" y2="68" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
-          <line x1="32" y1="50" x2="43" y2="50" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
-          <line x1="57" y1="50" x2="68" y2="50" stroke={color} strokeWidth="0.58" strokeOpacity="0.22" strokeLinecap="round" />
-        </svg>
-      </div>
-    );
-  }
-
   return (
     <div
       aria-hidden
       style={{
         position: 'absolute',
         left: '50%',
-        top: '50%',
+        top: `${centerY * 100}%`,
         width: size,
         height: size,
         transform: 'translate(-50%, -50%)',
@@ -192,231 +313,185 @@ function TrackCircle({
         boxShadow: thin
           ? `0 0 6px ${color}22`
           : `0 0 10px ${color}44, inset 0 0 12px ${color}22`,
-        transition: 'border-color 0.35s ease, box-shadow 0.35s ease, opacity 0.35s ease',
+        transition: `${TRACK_LAYOUT_TRANSITION}, border-color 0.35s ease, box-shadow 0.35s ease, opacity 0.35s ease`,
       }}
     />
   );
 }
 
-interface GlowRenderState extends TelescopeNearbyEmotionGlow {
-  /** 1 = 表示目標, 0 = フェードアウト中 */
-  targetOpacity: number;
-  opacity: number;
+interface DirectionMarkerRenderState extends TelescopeNearbyEmotionGlow {
+  shown: boolean;
 }
 
-/**
- * 穴の外の近い感情の方位を、円周上の内向きバーで示す。
- * 画面内の球は大きめに広がり、ラベル対象になると消える。フェードイン/アウトあり。
- */
-export function TelescopeRimColorGlow({
+/** 接眼内外にある感情の方向を、小さな円と縦書きラベルで示す。 */
+export function TelescopeRimEmotionIcons({
   focus,
   visible,
+  detailMode = false,
 }: TelescopeEyepieceHudProps) {
-  const [glows, setGlows] = useState<GlowRenderState[]>([]);
-  const glowsRef = useRef(glows);
-  glowsRef.current = glows;
   const nearestId = focus.nearest?.id ?? null;
+  const [markers, setMarkers] = useState<DirectionMarkerRenderState[]>([]);
 
   useEffect(() => {
-    if (!visible) {
-      setGlows((prev) =>
-        prev.map((g) => ({ ...g, targetOpacity: 0 })),
-      );
-      return;
-    }
-
-    const incoming = new Map(
-      focus.nearby
-        .filter((n) => n.id !== nearestId)
-        .map((n) => [n.id, n]),
+    const detectedDirection: TelescopeNearbyEmotionGlow | null =
+      detailMode && focus.nearest
+        ? {
+            id: focus.nearest.id,
+            color: focus.nearest.color,
+            angle: focus.nearest.angle,
+            nx: focus.nearest.nx,
+            ny: focus.nearest.ny,
+            weight: 1,
+            onScreen: true,
+          }
+        : null;
+    const incoming = visible
+      ? detailMode
+        ? [
+            ...(detectedDirection ? [detectedDirection] : []),
+            ...focus.nearby.filter((sample) => sample.id !== nearestId),
+          ]
+        : focus.nearby
+            .filter((sample) => sample.id !== nearestId)
+            .slice(0, 4)
+      : [];
+    const incomingById = new Map(
+      incoming.map((sample) => [sample.id, sample]),
     );
 
-    setGlows((prev) => {
-      const nextById = new Map<string, GlowRenderState>();
-
-      for (const g of prev) {
-        const sample = incoming.get(g.id);
-        if (sample && sample.id !== nearestId) {
-          nextById.set(g.id, {
-            ...g,
-            ...sample,
-            targetOpacity: 1,
-          });
-        } else {
-          // ラベル判定された／対象外 → フェードアウト
-          nextById.set(g.id, { ...g, targetOpacity: 0 });
+    setMarkers((previous) => {
+      const next = previous.map((marker) => {
+        const sample = incomingById.get(marker.id);
+        return sample
+          ? { ...marker, ...sample, shown: true }
+          : { ...marker, shown: false };
+      });
+      for (const sample of incoming) {
+        if (!previous.some((marker) => marker.id === sample.id)) {
+          next.push({ ...sample, shown: false });
         }
       }
-
-      for (const [id, sample] of incoming) {
-        if (!nextById.has(id)) {
-          nextById.set(id, {
-            ...sample,
-            targetOpacity: 1,
-            opacity: 0,
-          });
-        }
-      }
-
-      return Array.from(nextById.values());
+      return next;
     });
-  }, [focus.nearby, nearestId, visible]);
 
-  useEffect(() => {
-    let frame = 0;
-    const tick = () => {
-      const list = glowsRef.current;
-      let changed = false;
-      const next = list
-        .map((g) => {
-          const dir = g.targetOpacity > g.opacity ? 1 : g.targetOpacity < g.opacity ? -1 : 0;
-          if (dir === 0) {
-            return g;
-          }
-          changed = true;
-          const step = 1 / (RIM_FADE_MS / (1000 / 60));
-          const opacity = Math.max(
-            0,
-            Math.min(1, g.opacity + dir * step),
-          );
-          return { ...g, opacity };
-        })
-        .filter((g) => !(g.targetOpacity === 0 && g.opacity <= 0.01));
+    const enterFrame = requestAnimationFrame(() => {
+      setMarkers((previous) =>
+        previous.map((marker) =>
+          incomingById.has(marker.id) ? { ...marker, shown: true } : marker,
+        ),
+      );
+    });
+    const cleanupTimer = window.setTimeout(() => {
+      setMarkers((previous) => previous.filter((marker) => marker.shown));
+    }, 360);
 
-      if (changed || next.length !== list.length) {
-        setGlows(next);
-      }
-      frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(enterFrame);
+      window.clearTimeout(cleanupTimer);
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [focus.nearby, focus.nearest, nearestId, visible, detailMode]);
 
-  if (!visible && glows.length === 0) {
+  if (markers.length === 0) {
     return null;
   }
 
+  const trackRadius =
+    LABEL_TRACK_RADIUS *
+    (detailMode ? LAYER2_TRACK_SCALE : LAYER1_TRACK_SCALE);
+  const trackCenterY = detailMode
+    ? LAYER2_TRACK_CENTER_Y
+    : LAYER1_TRACK_CENTER_Y;
+  const trackSize = `${trackRadius * 200}%`;
+
   return (
-    <svg
-      viewBox="0 0 100 100"
+    <div
+      aria-hidden
       style={{
         position: 'absolute',
-        inset: '-1.5%',
-        width: '103%',
-        height: '103%',
+        inset: 0,
         pointerEvents: 'none',
         zIndex: 3,
-        overflow: 'visible',
       }}
-      aria-hidden
     >
-      <defs>
-        <filter id="telescope-rim-glow" x="-80%" y="-80%" width="260%" height="260%">
-          <feGaussianBlur stdDeviation="2.8" result="blurWide" />
-          <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" result="blurTight" />
-          <feMerge>
-            <feMergeNode in="blurWide" />
-            <feMergeNode in="blurTight" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
+      <div
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: `${trackCenterY * 100}%`,
+          width: trackSize,
+          height: trackSize,
+          transform: 'translate(-50%, -50%)',
+          transition: TRACK_LAYOUT_TRANSITION,
+        }}
+      >
+        {markers.map((sample) => {
+          // 移動後の円中心から対象の投影位置へ向かう正確な方位。
+          const targetX = 0.5 + sample.nx * 0.5;
+          const targetY = 0.5 - sample.ny * 0.5;
+          const directionX = targetX - 0.5;
+          const directionY = targetY - trackCenterY;
+          const directionLength =
+            Math.hypot(directionX, directionY) || 1;
+          const left = 50 + (directionX / directionLength) * 50;
+          const top = 50 + (directionY / directionLength) * 50;
+          const closeness = Math.max(0, Math.min(1, sample.weight));
+          const dotSize = 12 + closeness * 18;
+          const labelFontSize = 0.62 + closeness * 0.18;
 
-      <circle
-        cx="50"
-        cy="50"
-        r={RIM_R}
-        fill="none"
-        stroke="rgba(160, 170, 200, 0.14)"
-        strokeWidth="1.2"
-      />
-
-      {glows.map((sample) => {
-        // `angle` は NDC 上で 0=右, 反時計回り, Y-up。
-        // SVG 回転は 0=上配置の基準線を時計回りに回すので変換する。
-        const rotDeg = 90 - (sample.angle * 180) / Math.PI;
-        const spread = sample.onScreen ? 1.18 : 1;
-        const barLen = (2.4 + sample.weight * 4.8) * spread;
-        const arcSpreadDeg = (0.7 + sample.weight * 1.05) * spread;
-        const maxBars = 21; // 現在(14)の 1.5倍
-        const minBars = 10;
-        // weight が大きいほど「近い」想定 → 本数を増やす
-        const closenessT = Math.max(0, Math.min(1, sample.weight));
-        let barCount = Math.round(minBars + closenessT * (maxBars - minBars));
-        // 扇の中心で対称になるように奇数に丸める
-        if (barCount % 2 === 0) {
-          barCount += 1;
-        }
-        barCount = Math.min(maxBars, barCount);
-        const widthBoost = sample.onScreen ? 1.28 : 1;
-        const strokeW = (0.34 + sample.weight * 0.4) * widthBoost;
-        const groupOpacity = sample.opacity;
-        const baseBarOpacity = 0.78 + sample.weight * 0.22;
-        const centerIndex = (barCount - 1) / 2;
-        const maxCenterDist = Math.max(centerIndex, 1);
-
-        const barOffsets = Array.from(
-          { length: barCount },
-          (_, i) => (i - centerIndex) * arcSpreadDeg,
-        );
-
-        return (
-          <g
-            key={sample.id}
-            transform={`rotate(${rotDeg} 50 50)`}
-            opacity={groupOpacity}
-          >
-            {barOffsets.map((offsetDeg, index) => {
-              const distFromCenter = Math.abs(index - centerIndex) / maxCenterDist;
-              const centerWeight = 1 - distFromCenter;
-              const edgeFade = centerWeight * centerWeight;
-              const barOpacity = baseBarOpacity * (0.14 + edgeFade * 0.86);
-              const bentLen = barLen * (1 - distFromCenter * 0.1);
-              const glowLen = bentLen * 1.08;
-              const innerLen = bentLen * 0.62;
-              const startY = 50 - RIM_R - 1.1;
-
-              return (
-              <g key={index} transform={`rotate(${offsetDeg} 50 50)`}>
-                <line
-                  x1="50"
-                  y1={startY}
-                  x2="50"
-                  y2={startY - glowLen}
-                  stroke={sample.color}
-                  strokeWidth={strokeW * 2.8}
-                  strokeLinecap="round"
-                  strokeOpacity={barOpacity * 0.18}
-                  filter="url(#telescope-rim-glow)"
-                />
-                <line
-                  x1="50"
-                  y1={startY}
-                  x2="50"
-                  // 円の外側方向へ伸ばす（中心ではなく外へ）
-                  y2={startY - bentLen}
-                  stroke={sample.color}
-                  strokeWidth={strokeW}
-                  strokeLinecap="round"
-                  strokeOpacity={barOpacity}
-                  filter="url(#telescope-rim-glow)"
-                />
-                <line
-                  x1="50"
-                  y1={startY}
-                  x2="50"
-                  y2={startY - innerLen}
-                  stroke={sample.color}
-                  strokeWidth={strokeW * 0.5}
-                  strokeLinecap="round"
-                  strokeOpacity={barOpacity * 0.72}
-                />
-              </g>
-              );
-            })}
-          </g>
-        );
-      })}
-    </svg>
+          return (
+            <div
+              key={sample.id}
+              style={{
+                position: 'absolute',
+                left: `${left}%`,
+                top: `${top}%`,
+                transform: `translate(-50%, -50%) scale(${sample.shown ? 1 : 0.82})`,
+                opacity: sample.shown ? 0.55 + closeness * 0.45 : 0,
+                transition:
+                  'left 140ms linear, top 140ms linear, opacity 300ms ease, transform 300ms ease',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: dotSize,
+                  height: dotSize,
+                  transform: 'translate(-50%, -50%)',
+                  borderRadius: '50%',
+                  backgroundColor: sample.color,
+                  boxShadow: `0 0 ${8 + closeness * 14}px ${sample.color}aa`,
+                  transition:
+                    'width 180ms ease, height 180ms ease, box-shadow 180ms ease',
+                }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  display: 'block',
+                  left: '50%',
+                  top: `calc(50% + ${dotSize * 0.5 + 6}px)`,
+                  transform: 'translateX(-50%)',
+                  writingMode: 'vertical-rl',
+                  textOrientation: 'upright',
+                  width: '1.2em',
+                  height: 'max-content',
+                  whiteSpace: 'nowrap',
+                  fontSize: `${labelFontSize.toFixed(3)}rem`,
+                  fontWeight: 650,
+                  letterSpacing: '0.14em',
+                  color: sample.color,
+                  lineHeight: 1.1,
+                  transition: 'top 180ms ease, font-size 180ms ease',
+                }}
+              >
+                {getEmotionLabel(sample.id)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

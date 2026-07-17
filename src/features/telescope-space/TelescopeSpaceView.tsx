@@ -1,19 +1,23 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
+import { getBasicEmotion } from '../../data/emotions';
 import { EmotionMinimap } from '../../components/EmotionMinimap';
 import { ROUTES } from '../../routes/paths';
+import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
+import type { UserPlotRow } from '../../types/userPlot';
 import { getPrimaryEmotionColor } from '../../utils/emotionPlotBridge';
 import {
   DEFAULT_EMOTION_UI_ACCENT,
   getEmotionUiTheme,
 } from '../../utils/emotionUiTheme';
 import type { MinimapSyncState } from '../../utils/emotionMinimapLayout';
+import { mergeWithSeedPlots } from '../../utils/seedPlots';
 import type { TelescopeSettledPhase, TelescopeZoomPhase } from './constants';
 import { TelescopeEyepiece } from './TelescopeEyepiece';
 import {
   TelescopeInnerTrackLabel,
-  TelescopeRimColorGlow,
+  TelescopeRimEmotionIcons,
 } from './TelescopeEyepieceHud';
 import {
   resolveFocusBasicId,
@@ -51,35 +55,36 @@ function apertureForPhase(phase: TelescopeZoomPhase): number {
     case 'zooming-out':
       return 0.7;
     case 'zooming-in':
-      return 0.85;
     case 'detail':
-      return 1;
+      // TelescopeEyepiece の sizeScale = 0.9 + aperture * 0.1 により1.2倍。
+      return 3;
     case 'retreating':
       return 0.25;
   }
 }
 
-function layerCopy(settled: TelescopeSettledPhase): { body: string; layer: string } {
+function layerLabel(settled: TelescopeSettledPhase): string {
   switch (settled) {
     case 'far':
-      return {
-        body: '遠景 — 接眼レンズ越しに感情の銀河が一点に見えます。円内をクリックで近づき、ドラッグで鏡筒を振れます。',
-        layer: 'LAYER 00 · 遠景',
-      };
+      return 'LAYER 00 · 遠景';
     case 'wide':
-      return {
-        body: '銀河レイヤー — 8つの基本感情のあいだに、24の合成感情がうっすら見えます。検知中の感情でクリックすると、関連感情が見渡せる視点へ移ります。',
-        layer: 'LAYER 01 · 銀河 8+24',
-      };
+      return 'LAYER 01 · 銀河 8+24';
     case 'detail':
-      return {
-        body: '関連見渡し — 環の中心と選択感情の延長線上へ移り、選択球を回転中心に、平面に対して縦の上下で立体的に見ます。',
-        layer: 'LAYER 02 · 延長視点',
-      };
+      return 'LAYER 02 · 感情語プロット';
   }
 }
 
 const EMPTY_FOCUS: TelescopeViewFocus = { nearest: null, nearby: [] };
+
+function getInfoUiScale(): number {
+  if (typeof window === 'undefined') {
+    return 1;
+  }
+  return Math.max(
+    0.6,
+    Math.min(1, window.innerWidth / 1180, window.innerHeight / 780),
+  );
+}
 
 /**
  * 望遠鏡モチーフの感情語探索空間（実験用）。
@@ -90,11 +95,49 @@ export function TelescopeSpaceView() {
   const [viewFocus, setViewFocus] = useState<TelescopeViewFocus>(EMPTY_FOCUS);
   const [focusBasicId, setFocusBasicId] = useState<BasicEmotionId | null>(null);
   const [minimapSync, setMinimapSync] = useState<MinimapSyncState | null>(null);
+  const [wordPlots, setWordPlots] = useState<UserPlotRow[]>([]);
+  const [infoUiScale, setInfoUiScale] = useState(getInfoUiScale);
+  const [layer2HudActive, setLayer2HudActive] = useState(false);
   const retreatTargetRef = useRef<TelescopeSettledPhase | null>(null);
+
+  useEffect(() => {
+    let frame = 0;
+    const updateScale = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        setInfoUiScale(getInfoUiScale());
+      });
+    };
+    window.addEventListener('resize', updateScale);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateScale);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadWordPlots = async () => {
+      try {
+        const fetched = await fetchEmotionWordsAsPlots();
+        if (!cancelled) {
+          setWordPlots(mergeWithSeedPlots(fetched));
+        }
+      } catch {
+        if (!cancelled) {
+          setWordPlots(mergeWithSeedPlots([]));
+        }
+      }
+    };
+    void loadWordPlots();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const busy = isBusyPhase(zoomPhase);
   const settled = settledFromPhase(zoomPhase);
-  const copy = layerCopy(settled);
+  const layer = layerLabel(settled);
   const aperture = useMemo(() => apertureForPhase(zoomPhase), [zoomPhase]);
   const showHud = true;
   const showRimGlow = settled !== 'far';
@@ -129,6 +172,7 @@ export function TelescopeSpaceView() {
         if (!locked) {
           return prev;
         }
+        setLayer2HudActive(false);
         setFocusBasicId(locked);
         return 'zooming-in';
       }
@@ -146,6 +190,9 @@ export function TelescopeSpaceView() {
         return;
       }
       retreatTargetRef.current = level;
+      if (current === 'detail') {
+        setLayer2HudActive(false);
+      }
       startZoomOutStep(current);
     },
     [busy, zoomPhase, startZoomOutStep],
@@ -156,6 +203,7 @@ export function TelescopeSpaceView() {
       setZoomPhase(phase);
       if (phase === 'wide' || phase === 'far') {
         setFocusBasicId(null);
+        setLayer2HudActive(false);
       }
       const target = retreatTargetRef.current;
       if (target && zoomLevelIndex(phase) > zoomLevelIndex(target)) {
@@ -174,6 +222,15 @@ export function TelescopeSpaceView() {
   const handleMinimapSync = useCallback((state: MinimapSyncState | null) => {
     setMinimapSync(state);
   }, []);
+
+  const detailHudMode = settled === 'detail' && layer2HudActive;
+  const selectedEmotion = useMemo(() => {
+    if (!focusBasicId) {
+      return null;
+    }
+    const emotion = getBasicEmotion(focusBasicId);
+    return { label: emotion.label, color: emotion.color };
+  }, [focusBasicId]);
 
   return (
     <div
@@ -205,26 +262,42 @@ export function TelescopeSpaceView() {
 
       <TelescopeEyepiece
         aperture={aperture}
+        rimGlowColor={selectedEmotion?.color}
         innerOverlay={
-          <TelescopeInnerTrackLabel focus={viewFocus} visible={showHud} />
+          <>
+            <TelescopeInnerTrackLabel
+              focus={viewFocus}
+              visible={showHud}
+              detailMode={detailHudMode}
+              selectedEmotion={selectedEmotion}
+            />
+            {detailHudMode ? (
+              <TelescopeRimEmotionIcons
+                focus={viewFocus}
+                visible={showRimGlow}
+                detailMode
+              />
+            ) : null}
+          </>
         }
         rimOverlay={
-          <TelescopeRimColorGlow focus={viewFocus} visible={showRimGlow} />
-        }
-        rightRail={
-          <TelescopeZoomLadder
-            current={settled}
-            busy={busy}
-            onRetreatTo={handleRetreatTo}
-          />
+          !detailHudMode ? (
+            <TelescopeRimEmotionIcons
+              focus={viewFocus}
+              visible={showRimGlow}
+              detailMode={false}
+            />
+          ) : null
         }
       >
         <TelescopeSpaceCanvas
           zoomPhase={zoomPhase}
           focusBasicId={focusBasicId}
+          wordPlots={wordPlots}
           viewFocus={viewFocus}
           onZoomComplete={handleZoomComplete}
           onCanvasClickZoom={handleCanvasClickZoom}
+          onLayer2RotationComplete={() => setLayer2HudActive(true)}
           onViewFocus={handleViewFocus}
           onMinimapSync={handleMinimapSync}
         />
@@ -233,51 +306,42 @@ export function TelescopeSpaceView() {
       <div
         style={{
           position: 'absolute',
-          top: 20,
-          left: 20,
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 360,
           zIndex: 2,
           display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          paddingRight: 28,
+          boxSizing: 'border-box',
+          background:
+            'linear-gradient(to left, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.56) 38%, rgba(0, 0, 0, 0) 100%)',
           pointerEvents: 'none',
         }}
       >
-        <div style={{ pointerEvents: 'none' }}>
-          <EmotionMinimap syncState={minimapSync} uiTheme={minimapUiTheme} layout="galaxy-ring" />
-        </div>
+        <TelescopeZoomLadder
+          current={settled}
+          busy={busy}
+          onRetreatTo={handleRetreatTo}
+          selectedEmotion={selectedEmotion}
+        />
+      </div>
 
-        <div style={{ maxWidth: 400 }}>
-          <p
-            style={{
-              margin: 0,
-              fontSize: '0.72rem',
-              letterSpacing: '0.18em',
-              opacity: 0.55,
-            }}
-          >
-            TELESCOPE SPACE · 実験
-          </p>
-          <h1
-            style={{
-              margin: '8px 0 0',
-              fontSize: 'clamp(1.25rem, 3vw, 1.7rem)',
-              fontWeight: 600,
-              letterSpacing: '0.08em',
-            }}
-          >
-            感情の銀河をのぞく
-          </h1>
-          <p
-            style={{
-              margin: '10px 0 0',
-              fontSize: '0.88rem',
-              lineHeight: 1.65,
-              opacity: 0.72,
-            }}
-          >
-            {copy.body}
-          </p>
-        </div>
+      <div
+        style={{
+          position: 'absolute',
+          top: Math.round(20 * infoUiScale),
+          left: Math.round(20 * infoUiScale),
+          zIndex: 2,
+          pointerEvents: 'none',
+          transform: `scale(${infoUiScale})`,
+          transformOrigin: 'top left',
+          transition: 'transform 180ms ease',
+        }}
+      >
+        <EmotionMinimap syncState={minimapSync} uiTheme={minimapUiTheme} layout="galaxy-ring" />
       </div>
 
       <div
@@ -344,7 +408,7 @@ export function TelescopeSpaceView() {
             textAlign: 'center',
           }}
         >
-          {busy ? '調整中…' : copy.layer}
+          {busy ? '調整中…' : layer}
           {!busy && settled !== 'detail' ? '  ·  円内クリックで近づく / 右の点で戻る' : null}
           {!busy && settled === 'detail' ? '  ·  右の点で戻る / ドラッグで見回す' : null}
         </p>

@@ -4,6 +4,8 @@ export const ROUTES = {
   emotionMap: '/map',
   /** 望遠鏡モチーフの感情空間（実験） */
   telescopeSpace: '/telescope',
+  /** コンセプト解説チュートリアル */
+  conceptTutorial: '/concept',
   devWords: '/dev/words',
 } as const;
 

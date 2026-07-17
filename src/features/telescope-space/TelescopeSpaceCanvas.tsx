@@ -1,8 +1,9 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import { getEmotionById } from '../../data/emotions';
+import type { UserPlotRow } from '../../types/userPlot';
 import type { MinimapSyncState } from '../../utils/emotionMinimapLayout';
 import { getTelescopeEmotionWorldPosition } from '../../utils/telescopeMinimapLayout';
 import {
@@ -10,9 +11,7 @@ import {
   TELESCOPE_CAMERA_DISTANCE_WIDE,
   TELESCOPE_CAMERA_FOV,
   TELESCOPE_CLICK_DRAG_THRESHOLD_PX,
-  TELESCOPE_LAYER2_PULLBACK_DISTANCE_MUL,
-  TELESCOPE_LAYER2_PULLBACK_FOV,
-  TELESCOPE_LAYER2_PULLBACK_MS,
+  TELESCOPE_GALAXY_RADIUS,
   TELESCOPE_LAYER2_ROTATE_MS,
   TELESCOPE_ORBIT_FOLLOW_MIN_MUL,
   TELESCOPE_ORBIT_FOLLOW_RANGE,
@@ -29,7 +28,7 @@ import {
 } from './constants';
 import {
   computeFocusCameraPose,
-  computeSurveyPullbackPose,
+  getFocusEmotionPosition,
   TELESCOPE_FOCUS_PLANE_UP,
   TELESCOPE_FOCUS_VIEW,
   type TelescopeFocusCameraPose,
@@ -42,35 +41,62 @@ import {
 interface TelescopeSpaceCanvasProps {
   zoomPhase: TelescopeZoomPhase;
   focusBasicId: BasicEmotionId | null;
+  wordPlots: readonly UserPlotRow[];
   viewFocus: TelescopeViewFocus;
   onZoomComplete?: (phase: TelescopeSettledPhase) => void;
   onCanvasClickZoom?: () => void;
+  onLayer2RotationComplete?: () => void;
   onViewFocus?: (focus: TelescopeViewFocus) => void;
   onMinimapSync?: (state: MinimapSyncState | null) => void;
 }
 
 const PIVOT = new THREE.Vector3(...TELESCOPE_PIVOT);
 const LOOK_AHEAD = new THREE.Vector3();
-const TMP_POS = new THREE.Vector3();
 const TMP_LOOK = new THREE.Vector3();
-const TMP_OFFSET = new THREE.Vector3();
-const TMP_RADIAL = new THREE.Vector3();
 const TMP_TANGENT = new THREE.Vector3();
 const TMP_UP = new THREE.Vector3();
-const PLANE_UP = new THREE.Vector3(...TELESCOPE_FOCUS_PLANE_UP);
+const TMP_FORWARD = new THREE.Vector3();
 const SURVEY_UP = new THREE.Vector3(0, 1, 0);
+const FOCUS_UP = new THREE.Vector3(...TELESCOPE_FOCUS_PLANE_UP);
+const REACT_SYNC_INTERVAL_MS = 1000 / 24;
 
 type CameraMode = 'survey' | 'focus';
-type ZoomInSubPhase = 'pullBack' | 'rotate' | 'focusIn';
+type ZoomInSubPhase = 'rotate' | 'focusIn';
 
-function easePullBack(t: number): number {
-  // 終端で減速しすぎない（引いた後の静止感を抑える）
-  return 1 - (1 - t) * (1 - t);
+/**
+ * 遷移中の中間姿勢用。選択感情→原点の XY 方向を画面上にし、
+ * 8感情の中心が画面上側に来るようにする。
+ */
+function getFocusScreenUp(
+  base: TelescopeFocusCameraPose,
+  out: THREE.Vector3,
+): THREE.Vector3 {
+  out.set(-base.lookAt[0], -base.lookAt[1], 0);
+  if (out.lengthSq() < 1e-8) {
+    return out.copy(FOCUS_UP);
+  }
+  return out.normalize();
 }
 
-function easeRotateStart(t: number): number {
-  // 回転開始を早め、引き直後の静止感を抑える
-  return t * t;
+function easeRotateToFocusView(t: number): number {
+  return t * t * (3 - 2 * t);
+}
+
+function orientationLookingAt(
+  position: THREE.Vector3,
+  lookAt: THREE.Vector3,
+  up: THREE.Vector3,
+  out: THREE.Quaternion,
+): THREE.Quaternion {
+  TMP_FORWARD.copy(lookAt).sub(position);
+  if (TMP_FORWARD.lengthSq() < 1e-8) {
+    TMP_FORWARD.set(0, 0, -1);
+  } else {
+    TMP_FORWARD.normalize();
+  }
+  const basis = new THREE.Matrix4();
+  basis.lookAt(position, lookAt, up);
+  return out.setFromRotationMatrix(basis);
 }
 
 /**
@@ -147,42 +173,81 @@ function applySurveySpherical(
   camera.lookAt(LOOK_AHEAD);
 }
 
+const _gazeDir = new THREE.Vector3();
+const _gazeHit = new THREE.Vector3();
+
+/**
+ * カメラ→注視点の視線と銀河平面(z=0)の交点。
+ * ミニマップ用：俯瞰カメラの生座標(z≈28)をマーカーに渡さない。
+ */
+function intersectLookWithGalaxyPlane(
+  cameraPosition: THREE.Vector3,
+  lookAt: THREE.Vector3,
+): [number, number, number] {
+  _gazeDir.copy(lookAt).sub(cameraPosition);
+  if (Math.abs(_gazeDir.z) < 1e-6) {
+    return [lookAt.x, lookAt.y, 0];
+  }
+  const t = -cameraPosition.z / _gazeDir.z;
+  if (t < 0.05) {
+    // 背面や極端に近い交点は注視点の XY へフォールバック
+    return [lookAt.x, lookAt.y, 0];
+  }
+  _gazeHit.copy(cameraPosition).addScaledVector(_gazeDir, t);
+  // 環の少し外までに抑え、マーカーが飛んでいかないようにする
+  const maxR = TELESCOPE_GALAXY_RADIUS * 1.35;
+  const r = Math.hypot(_gazeHit.x, _gazeHit.y);
+  if (r > maxR) {
+    const s = maxR / r;
+    return [_gazeHit.x * s, _gazeHit.y * s, 0];
+  }
+  return [_gazeHit.x, _gazeHit.y, 0];
+}
+
 function applyFocusPose(
   camera: THREE.PerspectiveCamera,
   base: TelescopeFocusCameraPose,
   orbitYaw: number,
   orbitPitch: number,
 ) {
-  // 回転中心＝選択球
-  TMP_LOOK.set(...base.lookAt);
-  TMP_OFFSET.set(
-    base.position[0] - base.lookAt[0],
-    base.position[1] - base.lookAt[1],
-    base.position[2] - base.lookAt[2],
-  );
+  // 回転中心＝カメラ自身。位置固定、視線だけ左右・上下。
+  // up は環平面法線で固定し、正面＝選択感情方向にする。
+  camera.position.set(...base.position);
 
-  // 環平面内の動径・接線。pitch=平面に対する上下、yaw=平面法線まわり
-  TMP_RADIAL.set(base.lookAt[0], base.lookAt[1], 0);
-  if (TMP_RADIAL.lengthSq() < 1e-8) {
-    TMP_RADIAL.set(0, 1, 0);
+  TMP_FORWARD.set(
+    base.lookAt[0] - base.position[0],
+    base.lookAt[1] - base.position[1],
+    base.lookAt[2] - base.position[2],
+  );
+  if (TMP_FORWARD.lengthSq() < 1e-8) {
+    TMP_FORWARD.set(0, 0, -1);
   } else {
-    TMP_RADIAL.normalize();
+    TMP_FORWARD.normalize();
   }
-  TMP_TANGENT.crossVectors(PLANE_UP, TMP_RADIAL);
+
+  TMP_UP.copy(FOCUS_UP);
+  TMP_FORWARD.applyAxisAngle(TMP_UP, orbitYaw);
+  TMP_TANGENT.crossVectors(TMP_FORWARD, TMP_UP);
   if (TMP_TANGENT.lengthSq() < 1e-8) {
     TMP_TANGENT.set(1, 0, 0);
   } else {
     TMP_TANGENT.normalize();
   }
+  TMP_FORWARD.applyAxisAngle(TMP_TANGENT, orbitPitch);
 
-  TMP_OFFSET.applyAxisAngle(TMP_TANGENT, orbitPitch);
-  TMP_OFFSET.applyAxisAngle(PLANE_UP, orbitYaw);
-
-  TMP_POS.copy(TMP_LOOK).add(TMP_OFFSET);
-  camera.position.copy(TMP_POS);
-  // どの感情でも画面上下＝環平面の法線方向
-  camera.up.copy(PLANE_UP);
+  TMP_LOOK.copy(camera.position).add(TMP_FORWARD);
+  camera.up.copy(TMP_UP);
   camera.lookAt(TMP_LOOK);
+}
+
+/** レイヤー2到着時に姿勢・画角・見回し角を正面基準へ揃える */
+function settleFocusCamera(
+  camera: THREE.PerspectiveCamera,
+  base: TelescopeFocusCameraPose,
+) {
+  camera.fov = TELESCOPE_FOCUS_VIEW.fov;
+  camera.updateProjectionMatrix();
+  applyFocusPose(camera, base, 0, 0);
 }
 
 function followSpeedMultiplier(errorDist: number): number {
@@ -197,6 +262,7 @@ function TelescopeCameraController({
   onZoomComplete,
   onCanvasClickZoom,
   onLayer2SceneChange,
+  onLayer2RotationComplete,
   onCameraStateChange,
 }: {
   zoomPhase: TelescopeZoomPhase;
@@ -204,6 +270,7 @@ function TelescopeCameraController({
   onZoomComplete?: (phase: TelescopeSettledPhase) => void;
   onCanvasClickZoom?: () => void;
   onLayer2SceneChange?: (active: boolean) => void;
+  onLayer2RotationComplete?: () => void;
   onCameraStateChange?: (
     state: Pick<MinimapSyncState, 'cameraPosition' | 'cameraTarget' | 'cameraUp'>,
   ) => void;
@@ -222,8 +289,6 @@ function TelescopeCameraController({
   const focusBase = useRef<TelescopeFocusCameraPose | null>(null);
   const focusOrbitYaw = useRef(0);
   const focusOrbitPitch = useRef(0);
-  const focusOrbitYawTarget = useRef(0);
-  const focusOrbitPitchTarget = useRef(0);
 
   const progress = useRef(1);
   const animDurationMs = useRef(TELESCOPE_ZOOM_MS);
@@ -239,6 +304,8 @@ function TelescopeCameraController({
   const toPhi = useRef(TELESCOPE_ORBIT_PHI_CENTER);
   const fromFov = useRef(TELESCOPE_CAMERA_FOV);
   const toFov = useRef(TELESCOPE_CAMERA_FOV);
+  const fromQuat = useRef(new THREE.Quaternion());
+  const toQuat = useRef(new THREE.Quaternion());
   /** survey 距離補間か、自由ポーズ補間か */
   const animKind = useRef<'survey' | 'free'>('survey');
   const animating = useRef(false);
@@ -246,13 +313,20 @@ function TelescopeCameraController({
   const zoomPhaseRef = useRef(zoomPhase);
   const zoomInSubPhase = useRef<ZoomInSubPhase | null>(null);
   const zoomInCameraLock = useRef(false);
-  const overviewLookAt = useRef(new THREE.Vector3());
-  const pullbackPosition = useRef(new THREE.Vector3());
+  const rotationPosition = useRef(new THREE.Vector3());
+  /** 遷移中の screen-up（原点が上）。最終カメラは FOCUS_UP に接続する */
+  const focusScreenUp = useRef(new THREE.Vector3().copy(FOCUS_UP));
   const completedRef = useRef(onZoomComplete);
   const clickZoomRef = useRef(onCanvasClickZoom);
   const layer2SceneRef = useRef(onLayer2SceneChange);
+  const rotationCompleteRef = useRef(onLayer2RotationComplete);
   const cameraStateRef = useRef(onCameraStateChange);
-  const minimapFrameCounter = useRef(0);
+  const lastReactSyncAt = useRef(-Infinity);
+  const lastReportedCamera = useRef<{
+    position: THREE.Vector3;
+    target: THREE.Vector3;
+    up: THREE.Vector3;
+  } | null>(null);
   const currentLookAt = useRef(new THREE.Vector3(...surveyWorldPose(
     TELESCOPE_CAMERA_DISTANCE_FAR,
     0,
@@ -261,6 +335,7 @@ function TelescopeCameraController({
   completedRef.current = onZoomComplete;
   clickZoomRef.current = onCanvasClickZoom;
   layer2SceneRef.current = onLayer2SceneChange;
+  rotationCompleteRef.current = onLayer2RotationComplete;
   cameraStateRef.current = onCameraStateChange;
   zoomPhaseRef.current = zoomPhase;
 
@@ -270,34 +345,44 @@ function TelescopeCameraController({
       return;
     }
 
-    minimapFrameCounter.current = (minimapFrameCounter.current + 1) % 2;
-    if (minimapFrameCounter.current !== 0) {
+    const now = performance.now();
+    if (now - lastReactSyncAt.current < REACT_SYNC_INTERVAL_MS) {
       return;
+    }
+
+    const previous = lastReportedCamera.current;
+    if (
+      previous &&
+      previous.position.distanceToSquared(camera.position) < 1e-8 &&
+      previous.target.distanceToSquared(currentLookAt.current) < 1e-8 &&
+      previous.up.distanceToSquared(camera.up) < 1e-8
+    ) {
+      return;
+    }
+
+    lastReactSyncAt.current = now;
+
+    if (previous) {
+      previous.position.copy(camera.position);
+      previous.target.copy(currentLookAt.current);
+      previous.up.copy(camera.up);
+    } else {
+      lastReportedCamera.current = {
+        position: camera.position.clone(),
+        target: currentLookAt.current.clone(),
+        up: camera.up.clone(),
+      };
     }
 
     onChange({
-      cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
-      cameraTarget: [currentLookAt.current.x, currentLookAt.current.y, currentLookAt.current.z],
-      cameraUp: [camera.up.x, camera.up.y, camera.up.z],
+      // 俯瞰時は視線と銀河平面の交点を「現在地」にし、Layer2 では実カメラ XY を平面へ落とす
+      cameraPosition:
+        mode.current === 'focus'
+          ? [camera.position.x, camera.position.y, 0]
+          : intersectLookWithGalaxyPlane(camera.position, currentLookAt.current),
+      cameraTarget: [0, 0, 0],
+      cameraUp: [0, 1, 0],
     });
-  };
-
-  const beginRotateFromPullback = (camera: THREE.PerspectiveCamera) => {
-    if (!focusBasicId || !focusBase.current) {
-      return;
-    }
-    pullbackPosition.current.copy(camera.position);
-    zoomInSubPhase.current = 'rotate';
-    animKind.current = 'free';
-    animDurationMs.current = TELESCOPE_LAYER2_ROTATE_MS;
-    fromPos.current.copy(pullbackPosition.current);
-    toPos.current.copy(pullbackPosition.current);
-    fromLook.current.copy(overviewLookAt.current);
-    toLook.current.set(...focusBase.current.lookAt);
-    fromFov.current = camera.fov;
-    toFov.current = camera.fov;
-    progress.current = 0;
-    animating.current = true;
   };
 
   const beginCloseUpFromRotate = (camera: THREE.PerspectiveCamera) => {
@@ -307,14 +392,16 @@ function TelescopeCameraController({
     const pose = focusBase.current;
     zoomInSubPhase.current = 'focusIn';
     layer2SceneRef.current?.(true);
+    rotationCompleteRef.current?.();
     animKind.current = 'free';
     animDurationMs.current = TELESCOPE_FOCUS_VIEW.moveMs;
-    fromPos.current.copy(pullbackPosition.current);
+    fromPos.current.copy(rotationPosition.current);
     toPos.current.set(...pose.position);
-    fromLook.current.set(...pose.lookAt);
+    fromLook.current.set(...getFocusEmotionPosition(focusBasicId));
     toLook.current.set(...pose.lookAt);
+    // 遷移時のscreen-upから、接近中に最終の平面upへ乗り換える。
     fromFov.current = camera.fov;
-    toFov.current = TELESCOPE_CAMERA_FOV;
+    toFov.current = TELESCOPE_FOCUS_VIEW.fov;
     progress.current = 0;
     animating.current = true;
     targetPhase.current = 'detail';
@@ -356,22 +443,37 @@ function TelescopeCameraController({
       focusBase.current = pose;
       focusOrbitYaw.current = 0;
       focusOrbitPitch.current = 0;
-      focusOrbitYawTarget.current = 0;
-      focusOrbitPitchTarget.current = 0;
-      zoomInSubPhase.current = 'pullBack';
+      zoomInSubPhase.current = 'rotate';
       zoomInCameraLock.current = true;
       layer2SceneRef.current?.(false);
       const from = surveyWorldPose(radius.current, theta.current, phi.current);
-      const pullback = computeSurveyPullbackPose(from, TELESCOPE_LAYER2_PULLBACK_DISTANCE_MUL);
+      const rotatePose: TelescopeFocusCameraPose = {
+        position: pose.position,
+        lookAt: getFocusEmotionPosition(focusBasicId),
+      };
+      rotationPosition.current.set(...from.position);
       fromPos.current.set(...from.position);
+      toPos.current.set(...from.position);
       fromLook.current.set(...from.lookAt);
-      overviewLookAt.current.copy(fromLook.current);
-      toPos.current.set(...pullback.position);
-      toLook.current.set(...pullback.lookAt);
-      fromFov.current = TELESCOPE_CAMERA_FOV;
-      toFov.current = TELESCOPE_LAYER2_PULLBACK_FOV;
+      toLook.current.set(...rotatePose.lookAt);
+      // 第1段: 位置固定のまま、選択感情注視＋原点が画面上の姿勢へ回転
+      getFocusScreenUp(rotatePose, focusScreenUp.current);
+      orientationLookingAt(
+        fromPos.current,
+        fromLook.current,
+        SURVEY_UP,
+        fromQuat.current,
+      );
+      orientationLookingAt(
+        toPos.current,
+        toLook.current,
+        focusScreenUp.current,
+        toQuat.current,
+      );
+      fromFov.current = camera.fov;
+      toFov.current = camera.fov;
       animKind.current = 'free';
-      animDurationMs.current = TELESCOPE_LAYER2_PULLBACK_MS;
+      animDurationMs.current = TELESCOPE_LAYER2_ROTATE_MS;
       progress.current = 0;
       animating.current = true;
       targetPhase.current = 'detail';
@@ -382,6 +484,7 @@ function TelescopeCameraController({
       animKind.current = 'free';
       animDurationMs.current = TELESCOPE_FOCUS_VIEW.moveMs;
       if (focusBase.current) {
+        focusScreenUp.current.copy(FOCUS_UP);
         applyFocusPose(
           camera,
           focusBase.current,
@@ -389,7 +492,7 @@ function TelescopeCameraController({
           focusOrbitPitch.current,
         );
         fromPos.current.copy(camera.position);
-        fromLook.current.set(...focusBase.current.lookAt);
+        fromLook.current.copy(TMP_LOOK);
       } else {
         const from = surveyWorldPose(radius.current, theta.current, phi.current);
         fromPos.current.set(...from.position);
@@ -402,6 +505,8 @@ function TelescopeCameraController({
       );
       toPos.current.set(...wide.position);
       toLook.current.set(...wide.lookAt);
+      fromFov.current = camera.fov;
+      toFov.current = TELESCOPE_CAMERA_FOV;
       orbitCenterTheta.current = 0;
       orbitCenterPhi.current = TELESCOPE_ORBIT_PHI_CENTER;
       orbitRadiusMax.current = TELESCOPE_ORBIT_RADIUS_MAX;
@@ -433,6 +538,11 @@ function TelescopeCameraController({
       if (!focusBase.current) {
         focusBase.current = computeFocusCameraPose(focusBasicId);
       }
+      focusOrbitYaw.current = 0;
+      focusOrbitPitch.current = 0;
+      focusScreenUp.current.copy(FOCUS_UP);
+      settleFocusCamera(camera, focusBase.current);
+      currentLookAt.current.copy(TMP_LOOK);
     } else if (zoomPhase === 'wide') {
       mode.current = 'survey';
       focusBase.current = null;
@@ -496,11 +606,11 @@ function TelescopeCameraController({
       if (mode.current === 'focus') {
         const sens = TELESCOPE_FOCUS_VIEW.orbitSensitivity;
         const next = clampFocusOrbit(
-          focusOrbitYawTarget.current - dx * sens,
-          focusOrbitPitchTarget.current - dy * sens,
+          focusOrbitYaw.current - dx * sens,
+          focusOrbitPitch.current - dy * sens,
         );
-        focusOrbitYawTarget.current = next.yaw;
-        focusOrbitPitchTarget.current = next.pitch;
+        focusOrbitYaw.current = next.yaw;
+        focusOrbitPitch.current = next.pitch;
         return;
       }
 
@@ -556,26 +666,38 @@ function TelescopeCameraController({
       progress.current = Math.min(1, progress.current + delta / (duration / 1000));
       const t = progress.current;
       const eased =
-        zoomInSubPhase.current === 'pullBack'
-          ? easePullBack(t)
-          : zoomInSubPhase.current === 'rotate'
-            ? easeRotateStart(t)
-            : t * t * (3 - 2 * t);
+        zoomInSubPhase.current === 'rotate'
+          ? easeRotateToFocusView(t)
+          : t * t * (3 - 2 * t);
 
       if (animKind.current === 'free') {
         camera.position.lerpVectors(fromPos.current, toPos.current, eased);
-        TMP_LOOK.lerpVectors(fromLook.current, toLook.current, eased);
         if (zoomInSubPhase.current === 'rotate') {
-          TMP_UP.lerpVectors(SURVEY_UP, PLANE_UP, eased).normalize();
-        } else if (zoomInSubPhase.current === 'focusIn') {
-          TMP_UP.copy(PLANE_UP);
-        } else if (zoomPhaseRef.current === 'zooming-out') {
-          TMP_UP.lerpVectors(PLANE_UP, SURVEY_UP, eased).normalize();
+          // 位置は保ったまま、選択感情注視＋原点が画面上側の姿勢へ回り込む。
+          camera.quaternion.slerpQuaternions(
+            fromQuat.current,
+            toQuat.current,
+            eased,
+          );
+          TMP_LOOK.lerpVectors(fromLook.current, toLook.current, eased);
+          camera.up.copy(focusScreenUp.current);
         } else {
-          TMP_UP.copy(SURVEY_UP);
+          TMP_LOOK.lerpVectors(fromLook.current, toLook.current, eased);
+          if (zoomInSubPhase.current === 'focusIn') {
+            // 接近しながら遷移 up → 最終の平面 up へ滑らかに接続
+            TMP_UP.lerpVectors(
+              focusScreenUp.current,
+              FOCUS_UP,
+              eased,
+            ).normalize();
+          } else if (zoomPhaseRef.current === 'zooming-out') {
+            TMP_UP.lerpVectors(FOCUS_UP, SURVEY_UP, eased).normalize();
+          } else {
+            TMP_UP.copy(SURVEY_UP);
+          }
+          camera.up.copy(TMP_UP);
+          camera.lookAt(TMP_LOOK);
         }
-        camera.up.copy(TMP_UP);
-        camera.lookAt(TMP_LOOK);
         currentLookAt.current.copy(TMP_LOOK);
         camera.fov = THREE.MathUtils.lerp(fromFov.current, toFov.current, eased);
         camera.updateProjectionMatrix();
@@ -605,14 +727,6 @@ function TelescopeCameraController({
         animating.current = false;
         if (
           zoomPhaseRef.current === 'zooming-in' &&
-          zoomInSubPhase.current === 'pullBack'
-        ) {
-          pullbackPosition.current.copy(camera.position);
-          beginRotateFromPullback(camera);
-          return;
-        }
-        if (
-          zoomPhaseRef.current === 'zooming-in' &&
           zoomInSubPhase.current === 'rotate'
         ) {
           beginCloseUpFromRotate(camera);
@@ -625,6 +739,12 @@ function TelescopeCameraController({
           zoomInSubPhase.current = null;
           zoomInCameraLock.current = false;
           mode.current = 'focus';
+          focusOrbitYaw.current = 0;
+          focusOrbitPitch.current = 0;
+          if (focusBase.current) {
+            settleFocusCamera(camera, focusBase.current);
+            currentLookAt.current.copy(TMP_LOOK);
+          }
           completedRef.current?.('detail');
           return;
         }
@@ -657,20 +777,6 @@ function TelescopeCameraController({
     }
 
     if (mode.current === 'focus' && focusBase.current) {
-      const errY = focusOrbitYawTarget.current - focusOrbitYaw.current;
-      const errP = focusOrbitPitchTarget.current - focusOrbitPitch.current;
-      const errDist = Math.hypot(errY, errP);
-      if (errDist > 1e-6) {
-        const step =
-          TELESCOPE_ORBIT_FOLLOW_SPEED * followSpeedMultiplier(errDist) * delta;
-        const move = Math.min(step, errDist);
-        const inv = move / errDist;
-        focusOrbitYaw.current += errY * inv;
-        focusOrbitPitch.current += errP * inv;
-      } else {
-        focusOrbitYaw.current = focusOrbitYawTarget.current;
-        focusOrbitPitch.current = focusOrbitPitchTarget.current;
-      }
       applyFocusPose(
         camera,
         focusBase.current,
@@ -737,20 +843,13 @@ function TelescopeMinimapSync({
   layer2SceneActive: boolean;
   onChange?: (state: MinimapSyncState | null) => void;
 }) {
-  const frameCounter = useRef(0);
-
-  useFrame(() => {
+  useEffect(() => {
     if (!onChange) {
       return;
     }
 
     if (!cameraState) {
       onChange(null);
-      return;
-    }
-
-    frameCounter.current = (frameCounter.current + 1) % 2;
-    if (frameCounter.current !== 0) {
       return;
     }
 
@@ -778,52 +877,116 @@ function TelescopeMinimapSync({
       primaryLabel: focus.label,
       relatedLinkBasicId,
     });
-  });
+  }, [
+    cameraState,
+    focusBasicId,
+    layer2SceneActive,
+    onChange,
+    viewFocus,
+  ]);
 
   return null;
 }
 
-function Starfield() {
-  const positions = useRef<Float32Array | null>(null);
-  if (!positions.current) {
-    const count = 1400;
-    const arr = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const r = 16 + Math.random() * 48;
-      const t = Math.random() * Math.PI * 2;
-      const p = Math.acos(2 * Math.random() - 1);
-      arr[i * 3] = r * Math.sin(p) * Math.cos(t);
-      arr[i * 3 + 1] = r * Math.sin(p) * Math.sin(t);
-      arr[i * 3 + 2] = r * Math.cos(p) - 6;
-    }
-    positions.current = arr;
-  }
+function createStarPositions(
+  count: number,
+  minRadius: number,
+  maxRadius: number,
+  seed: number,
+): Float32Array {
+  const positions = new Float32Array(count * 3);
+  let state = seed >>> 0;
+  const random = () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
 
+  for (let i = 0; i < count; i++) {
+    const radius = THREE.MathUtils.lerp(
+      minRadius,
+      maxRadius,
+      Math.cbrt(random()),
+    );
+    const azimuth = random() * Math.PI * 2;
+    const cosPolar = random() * 2 - 1;
+    const sinPolar = Math.sqrt(1 - cosPolar * cosPolar);
+    positions[i * 3] = radius * sinPolar * Math.cos(azimuth);
+    positions[i * 3 + 1] = radius * sinPolar * Math.sin(azimuth);
+    positions[i * 3 + 2] = radius * cosPolar + 4;
+  }
+  return positions;
+}
+
+function StarPoints({
+  positions,
+  size,
+  color,
+  opacity,
+}: {
+  positions: Float32Array;
+  size: number;
+  color: string;
+  opacity: number;
+}) {
   return (
     <points>
       <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions.current, 3]} />
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
       <pointsMaterial
-        size={0.024}
-        color="#c8d0e8"
+        size={size}
+        color={color}
         transparent
-        opacity={0.5}
+        opacity={opacity}
         depthWrite={false}
         sizeAttenuation
+        toneMapped={false}
       />
     </points>
+  );
+}
+
+function Starfield() {
+  const dimStars = useMemo(
+    () => createStarPositions(2200, 12, 68, 0x41c6ce57),
+    [],
+  );
+  const brightStars = useMemo(
+    () => createStarPositions(420, 7, 42, 0xb71d5eed),
+    [],
+  );
+
+  return (
+    <group>
+      <StarPoints
+        positions={dimStars}
+        size={0.035}
+        color="#dce7ff"
+        opacity={0.72}
+      />
+      <StarPoints
+        positions={brightStars}
+        size={0.075}
+        color="#ffffff"
+        opacity={0.95}
+      />
+    </group>
   );
 }
 
 function DetailVisibilityBridge({
   zoomPhase,
   focusBasicId,
+  wordPlots,
   layer2SceneActive,
   onViewFocus,
 }: {
   zoomPhase: TelescopeZoomPhase;
   focusBasicId: BasicEmotionId | null;
+  wordPlots: readonly UserPlotRow[];
   layer2SceneActive: boolean;
   onViewFocus?: (focus: TelescopeViewFocus) => void;
 }) {
@@ -885,7 +1048,9 @@ function DetailVisibilityBridge({
       }
     }
 
-    if (Math.abs(nextVis - lastVis.current) > 0.02 || nextVis === 0 || nextVis === 1) {
+    const reachedBoundary =
+      nextVis !== lastVis.current && (nextVis === 0 || nextVis === 1);
+    if (Math.abs(nextVis - lastVis.current) > 0.02 || reachedBoundary) {
       lastVis.current = nextVis;
       setVisibility(nextVis);
     }
@@ -897,6 +1062,7 @@ function DetailVisibilityBridge({
       detailVisibility={visibility}
       layer2SceneActive={layer2SceneActive}
       focusBasicId={focusBasicId}
+      wordPlots={wordPlots}
       onViewFocus={onViewFocus}
     />
   );
@@ -905,9 +1071,11 @@ function DetailVisibilityBridge({
 export function TelescopeSpaceCanvas({
   zoomPhase,
   focusBasicId,
+  wordPlots,
   viewFocus,
   onZoomComplete,
   onCanvasClickZoom,
+  onLayer2RotationComplete,
   onViewFocus,
   onMinimapSync,
 }: TelescopeSpaceCanvasProps) {
@@ -962,6 +1130,7 @@ export function TelescopeSpaceCanvas({
         onZoomComplete={onZoomComplete}
         onCanvasClickZoom={onCanvasClickZoom}
         onLayer2SceneChange={setLayer2SceneActive}
+        onLayer2RotationComplete={onLayer2RotationComplete}
         onCameraStateChange={handleCameraStateChange}
       />
       <TelescopeMinimapSync
@@ -977,6 +1146,7 @@ export function TelescopeSpaceCanvas({
       <DetailVisibilityBridge
         zoomPhase={zoomPhase}
         focusBasicId={focusBasicId}
+        wordPlots={wordPlots}
         layer2SceneActive={layer2SceneActive}
         onViewFocus={onViewFocus}
       />

@@ -17,10 +17,21 @@ import {
 /** ミニマップ表示用スケール（銀河環半径を 1 に正規化） */
 export const TELESCOPE_MINIMAP_SCALE = 1 / TELESCOPE_GALAXY_RADIUS;
 
+/** 注視中心は原点（カメラは真上から） */
 export const TELESCOPE_MINIMAP_SHAPE_CENTER: [number, number, number] = [0, 0, 0];
 
-/** 正面から銀河環を見るデフォルト視点 */
-export const TELESCOPE_MINIMAP_DEFAULT_CAMERA: [number, number, number] = [0.35, 0.28, 2.35];
+/**
+ * 円形フレーム内の Canvas ブロックを CSS でずらす／拡大する。
+ * 3D 座標ではなく描画ブロックごと動かすので、見た目に確実に効く。
+ */
+export const TELESCOPE_MINIMAP_VIEWPORT_TRANSFORM = {
+  translateXPx: 22,
+  translateYPx: 22,
+  scale: 1.14,
+} as const;
+
+/** 正面から銀河環を見るデフォルト視点（環の中心を画面中央に） */
+export const TELESCOPE_MINIMAP_DEFAULT_CAMERA: [number, number, number] = [0, 0, 2.45];
 
 export function worldToTelescopeMinimapLocal(x: number, y: number, z: number): [number, number, number] {
   const s = TELESCOPE_MINIMAP_SCALE;
@@ -88,6 +99,14 @@ export interface MinimapLayoutConfig {
   worldTupleToLocal: (tuple: [number, number, number]) => [number, number, number];
   shapeCenter: [number, number, number];
   defaultCamera: [number, number, number];
+  /** true なら同期カメラ向きを無視し、常に環を正面（上から）で見る */
+  lockTopDown?: boolean;
+  /** 円形クリップ内の Canvas ブロックを CSS で平行移動・拡大 */
+  viewportTransform?: {
+    translateXPx: number;
+    translateYPx: number;
+    scale: number;
+  };
 }
 
 export function getMinimapLayoutConfig(layout: EmotionMinimapLayout): MinimapLayoutConfig {
@@ -99,6 +118,8 @@ export function getMinimapLayoutConfig(layout: EmotionMinimapLayout): MinimapLay
       worldTupleToLocal: worldTupleToTelescopeMinimapLocal,
       shapeCenter: TELESCOPE_MINIMAP_SHAPE_CENTER,
       defaultCamera: TELESCOPE_MINIMAP_DEFAULT_CAMERA,
+      lockTopDown: true,
+      viewportTransform: { ...TELESCOPE_MINIMAP_VIEWPORT_TRANSFORM },
     };
   }
 

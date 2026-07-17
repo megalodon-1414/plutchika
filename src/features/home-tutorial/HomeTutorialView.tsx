@@ -455,6 +455,22 @@ export function HomeTutorialView() {
           }}
         >
           <Link
+            to={ROUTES.conceptTutorial}
+            style={{
+              padding: `${Math.round(8 * uiScale)}px ${Math.round(14 * uiScale)}px`,
+              border: `1px solid ${uiTheme.controlBorder}`,
+              borderRadius: `${Math.round(8 * uiScale)}px`,
+              backgroundColor: uiTheme.controlBackground,
+              color: uiTheme.controlText,
+              fontSize: `${(0.78 * uiScale).toFixed(3)}rem`,
+              letterSpacing: '0.06em',
+              textDecoration: 'none',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            コンセプト解説
+          </Link>
+          <Link
             to={ROUTES.telescopeSpace}
             style={{
               padding: `${Math.round(8 * uiScale)}px ${Math.round(14 * uiScale)}px`,

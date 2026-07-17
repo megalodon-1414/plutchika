@@ -56,6 +56,10 @@ function MinimapCamera({
   const desiredUp = useRef(new THREE.Vector3(0, 1, 0));
   const boundingRadius = useMemo(() => layoutConfig.getBoundingRadius(), [layoutConfig]);
 
+  useEffect(() => {
+    shapeCenter.current.set(...layoutConfig.shapeCenter);
+  }, [layoutConfig]);
+
   useFrame(() => {
     if (!(camera instanceof THREE.PerspectiveCamera)) {
       return;
@@ -63,7 +67,15 @@ function MinimapCamera({
 
     const fitDistance = computeFitDistance(camera, boundingRadius);
 
-    if (syncState) {
+    if (layoutConfig.lockTopDown || !syncState) {
+      // 望遠鏡銀河は俯瞰固定。見た目のずらし／拡大は viewportTransform（CSS）側。
+      desiredPosition.current
+        .set(...layoutConfig.defaultCamera)
+        .normalize()
+        .multiplyScalar(fitDistance)
+        .add(shapeCenter.current);
+      desiredUp.current.set(0, 1, 0);
+    } else {
       const camPos = new THREE.Vector3(...layoutConfig.worldTupleToLocal(syncState.cameraPosition));
       const camTarget = new THREE.Vector3(...layoutConfig.worldTupleToLocal(syncState.cameraTarget));
       const viewDir = camPos.sub(camTarget);
@@ -73,15 +85,14 @@ function MinimapCamera({
         desiredPosition.current.set(...layoutConfig.defaultCamera).normalize().multiplyScalar(fitDistance);
       }
       desiredUp.current.set(...syncState.cameraUp).normalize();
-    } else {
-      desiredPosition.current
-        .set(...layoutConfig.defaultCamera)
-        .normalize()
-        .multiplyScalar(fitDistance);
-      desiredUp.current.set(0, 1, 0);
     }
 
     camera.position.lerp(desiredPosition.current, 0.22);
+    if (layoutConfig.lockTopDown) {
+      // 真上固定（XY は shapeCenter＝原点）
+      camera.position.x = shapeCenter.current.x;
+      camera.position.y = shapeCenter.current.y;
+    }
     camera.up.copy(desiredUp.current);
     camera.lookAt(shapeCenter.current);
   });
@@ -629,24 +640,35 @@ export function EmotionMinimap({
                 transition: UI_COLOR_TRANSITION,
               }}
             >
-              <Canvas
-                camera={{ position: layoutConfig.defaultCamera, fov: 36, near: 0.05, far: 20 }}
-                dpr={[1, 1.5]}
-                gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }}
-                style={{ width: '100%', height: '100%', background: 'transparent' }}
-                onCreated={({ gl }) => {
-                  gl.setClearColor(0x000000, 0);
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  transform: layoutConfig.viewportTransform
+                    ? `translate(${layoutConfig.viewportTransform.translateXPx}px, ${layoutConfig.viewportTransform.translateYPx}px) scale(${layoutConfig.viewportTransform.scale})`
+                    : undefined,
+                  transformOrigin: 'center center',
                 }}
               >
-                <MinimapScene
-                  syncState={syncState}
-                  holoColor={uiTheme.holoPrimary}
-                  markerColor={uiTheme.markerColor}
-                  layoutConfig={layoutConfig}
-                  positionMarker={resolvedPositionMarker}
-                  galaxyRing={layout === 'galaxy-ring'}
-                />
-              </Canvas>
+                <Canvas
+                  camera={{ position: layoutConfig.defaultCamera, fov: 36, near: 0.05, far: 20 }}
+                  dpr={[1, 1.5]}
+                  gl={{ antialias: true, alpha: true, powerPreference: 'low-power' }}
+                  style={{ width: '100%', height: '100%', background: 'transparent' }}
+                  onCreated={({ gl }) => {
+                    gl.setClearColor(0x000000, 0);
+                  }}
+                >
+                  <MinimapScene
+                    syncState={syncState}
+                    holoColor={uiTheme.holoPrimary}
+                    markerColor={uiTheme.markerColor}
+                    layoutConfig={layoutConfig}
+                    positionMarker={resolvedPositionMarker}
+                    galaxyRing={layout === 'galaxy-ring'}
+                  />
+                </Canvas>
+              </div>
 
               <div
                 style={{

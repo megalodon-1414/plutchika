@@ -1,5 +1,9 @@
-import type { BasicEmotionId } from '../../data/emotions';
+import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import { BASIC_EMOTIONS, DYAD_EMOTIONS } from '../../data/emotions';
+import {
+  RING_RADIUS as MAP_EMOTION_RING_RADIUS,
+  getEmotionCenter,
+} from '../../utils/emotionSpaceLayout';
 
 /**
  * 銀河は原点（z=0）。回転中心は視点（カメラ）より後ろ（さらに +Z）。
@@ -87,10 +91,25 @@ export interface TelescopeNodePosition {
   distance?: 1 | 2 | 3;
 }
 
-function angleToXy(angleDeg: number, radius: number): [number, number] {
-  const rad = (angleDeg * Math.PI) / 180;
-  // 0° = +Y（喜びを上）になるよう、数学座標から 90° ずらす
-  return [Math.sin(rad) * radius, Math.cos(rad) * radius];
+/**
+ * `/map` の感情配置を上下層から平面へ戻し、望遠鏡の XY 平面へ変換する。
+ * map の joy=+X を telescope の joy=+Y に合わせる。
+ * 合成感情は構成する2基本感情を結ぶ線分の中点に置く。
+ */
+export function getTelescopeEmotionPosition(
+  id: EmotionId,
+): [number, number, number] {
+  const dyad = DYAD_EMOTIONS.find((entry) => entry.id === id);
+  if (dyad) {
+    const [aId, bId] = dyad.components;
+    const a = getTelescopeEmotionPosition(aId);
+    const b = getTelescopeEmotionPosition(bId);
+    return [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, 0];
+  }
+
+  const mapCenter = getEmotionCenter(id);
+  const scale = TELESCOPE_GALAXY_RADIUS / MAP_EMOTION_RING_RADIUS;
+  return [mapCenter.z * scale, mapCenter.x * scale, 0];
 }
 
 export function distanceForPhase(phase: TelescopeSettledPhase): number {
@@ -106,12 +125,11 @@ export function distanceForPhase(phase: TelescopeSettledPhase): number {
 
 export function buildTelescopeGalaxyNodes(): TelescopeNodePosition[] {
   return BASIC_EMOTIONS.map((emotion) => {
-    const [x, y] = angleToXy(emotion.angle, TELESCOPE_GALAXY_RADIUS);
     return {
       id: emotion.id,
       label: emotion.label,
       color: emotion.color,
-      position: [x, y, 0],
+      position: getTelescopeEmotionPosition(emotion.id),
       kind: 'basic' as const,
       basicId: emotion.id,
     };
@@ -119,28 +137,17 @@ export function buildTelescopeGalaxyNodes(): TelescopeNodePosition[] {
 }
 
 /**
- * 24合成感情 — 構成する2基本感情を結ぶ線分上（中点）に置く。
+ * 24合成感情 — 構成する2基本感情を結ぶ線分の中点に置く。
  * 8基本と合わせて32感情の固定配置。
  */
 export function buildTelescopeDetailNodes(): TelescopeNodePosition[] {
-  const basicPos = new Map(
-    buildTelescopeGalaxyNodes().map((n) => [n.id, n.position] as const),
-  );
-
   return DYAD_EMOTIONS.map((dyad) => {
-    const [aId, bId] = dyad.components;
-    const a = basicPos.get(aId)!;
-    const b = basicPos.get(bId)!;
-    // 2基本感情を結ぶ線分の中点（平面上＝線上）
-    const x = (a[0] + b[0]) * 0.5;
-    const y = (a[1] + b[1]) * 0.5;
-    const z = (a[2] + b[2]) * 0.5;
-
+    const [aId] = dyad.components;
     return {
       id: dyad.id,
       label: dyad.label,
       color: BASIC_EMOTIONS.find((e) => e.id === aId)!.color,
-      position: [x, y, z] as [number, number, number],
+      position: getTelescopeEmotionPosition(dyad.id),
       kind: 'dyad' as const,
       distance: dyad.distance,
     };

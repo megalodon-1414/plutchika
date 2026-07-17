@@ -1,7 +1,14 @@
 import * as THREE from 'three';
-import type { HomeTutorialStepDefinition } from './constants';
 
 const DEFAULT_CAMERA_DISTANCE = 5;
+
+/** カメラ姿勢の算出に必要な最小フィールド（home / concept 共通） */
+export interface HomeTutorialCameraStepPose {
+  worldPosition: [number, number, number];
+  cameraYaw?: number;
+  cameraPitch?: number;
+  cameraDistance?: number;
+}
 
 /**
  * ウィンドウ幅に応じたカメラ距離の倍率。
@@ -40,7 +47,7 @@ export interface HomeTutorialCameraPose {
 }
 
 export function getHomeTutorialCameraPose(
-  step: HomeTutorialStepDefinition,
+  step: HomeTutorialCameraStepPose,
   viewportWidth?: number,
 ): HomeTutorialCameraPose {
   const lookAt = new THREE.Vector3(...step.worldPosition);
