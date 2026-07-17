@@ -1,1 +1,1 @@
-export { HomeTutorialView as HomePage } from '../features/home-tutorial';
+export { HomeIntroView as HomePage } from '../features/home-intro';
