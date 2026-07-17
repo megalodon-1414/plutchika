@@ -1,0 +1,330 @@
+.home-intro-root {
+  /* 惑星の頂点（人物の足元）が来る、画面上端からの距離。
+     planet(PlanetGlobe.tsx) / walker / hills はここを基準に揃える。sceneLayout.ts の HOME_INTRO_HORIZON_RATIO と同じ値にする。 */
+  --intro-horizon: 62%;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 20%, #141c40 0%, #0a0f26 55%, #05070f 100%);
+  color: #f4ecf7;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+/* ①ロゴ画面 */
+.home-intro-logo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  animation: home-intro-fade-in 0.6s ease both;
+}
+
+.home-intro-logo__mark {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: #f4ecf7;
+}
+
+.home-intro-logo__hint {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.3em;
+  color: #9f8aaa;
+  animation: home-intro-hint-pulse 1.8s ease-in-out infinite;
+}
+
+/* 空（惑星の頂点まで） */
+.home-intro-sky {
+  position: absolute;
+  inset: 0 0 calc(100% - var(--intro-horizon)) 0;
+  padding: clamp(20px, 5vw, 56px);
+}
+
+.home-intro-sky__grid {
+  position: absolute;
+  inset: clamp(20px, 5vw, 56px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.home-intro-quadrant {
+  margin: 0;
+  animation: home-intro-fade-in 0.5s ease both;
+}
+
+.home-intro-quadrant--catchphrase {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  align-self: start;
+  font-size: 0.78rem;
+  letter-spacing: 0.24em;
+  color: #9f8aaa;
+}
+
+.home-intro-quadrant--heading {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+  text-align: right;
+  font-size: clamp(1.3rem, 3vw, 2rem);
+  font-weight: 700;
+  line-height: 1.5;
+  max-width: 20em;
+}
+
+.home-intro-quadrant--action {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  align-self: end;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #c39bd3;
+}
+
+.home-intro-quadrant--body {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  align-self: end;
+  text-align: right;
+  max-width: 26em;
+  font-size: 0.9rem;
+  line-height: 1.85;
+  color: #d8cfe0;
+}
+
+/* 3層パララックス背景（星空／丘のシルエット／惑星） */
+.home-intro-walkscene {
+  position: absolute;
+  inset: 0;
+}
+
+/* 最奥：星空。ごくゆっくり流れる */
+.home-intro-stars {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.home-intro-stars__layer {
+  position: absolute;
+  top: 0;
+  left: -100vw;
+  width: 300vw;
+  height: 100%;
+  transition: transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.home-intro-stars__dot {
+  position: absolute;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+/* 中間：惑星の起伏（丘のシルエット）。中くらいの速さで流れる */
+.home-intro-hills {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--intro-horizon) - 9vh);
+  height: 12vh;
+  overflow: hidden;
+}
+
+.home-intro-hills__layer {
+  position: absolute;
+  top: 0;
+  left: -100vw;
+  width: 300vw;
+  height: 100%;
+  transition: transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.home-intro-hills__mound {
+  position: absolute;
+  bottom: -4vh;
+  border-radius: 50% 50% 0 0;
+  background: rgba(96, 104, 168, 0.4);
+}
+
+/* 手前：惑星本体は PlanetGlobe.tsx（Three.js の3Dスフィア、キャンバスは画面全体に position:absolute; inset:0）が描画する */
+
+/* 人物：惑星の頂点に固定。位置は動かさず、脚のパタパタと頭のバウンスだけで歩行感を出す */
+.home-intro-walker {
+  position: absolute;
+  left: 50%;
+  top: var(--intro-horizon);
+  width: 30px;
+  height: 58px;
+  transform: translate(-50%, -100%);
+  z-index: 5;
+}
+
+.home-intro-walker__head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f4ecf7;
+  transform: translateX(-50%);
+}
+
+.home-intro-walker__body {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  width: 26px;
+  height: 30px;
+  border-radius: 13px 13px 6px 6px;
+  background: #e4d9ea;
+  transform: translateX(-50%);
+}
+
+.home-intro-walker__leg {
+  position: absolute;
+  top: 42px;
+  width: 7px;
+  height: 16px;
+  border-radius: 3px;
+  background: #f4ecf7;
+  transform-origin: top center;
+}
+
+.home-intro-walker__leg--left {
+  left: 9px;
+}
+
+.home-intro-walker__leg--right {
+  left: 16px;
+}
+
+.home-intro-walker--idle .home-intro-walker__head {
+  animation: home-intro-idle-bob 2.2s ease-in-out infinite;
+}
+
+.home-intro-walker--step .home-intro-walker__head {
+  animation: home-intro-walk-head 0.72s steps(4) 1;
+}
+
+.home-intro-walker--step .home-intro-walker__leg--left {
+  animation: home-intro-walk-leg-left 0.72s steps(4) 1;
+}
+
+.home-intro-walker--step .home-intro-walker__leg--right {
+  animation: home-intro-walk-leg-right 0.72s steps(4) 1;
+}
+
+/* 進捗・スキップ */
+.home-intro-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.home-intro-progress__counter {
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  color: #f4ecf7;
+  text-shadow: 0 1px 6px rgba(5, 7, 15, 0.85);
+}
+
+.home-intro-progress__skip {
+  pointer-events: auto;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: #f4ecf7;
+  text-decoration: none;
+  text-shadow: 0 1px 6px rgba(5, 7, 15, 0.85);
+}
+
+@keyframes home-intro-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes home-intro-hint-pulse {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes home-intro-idle-bob {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-2px);
+  }
+}
+
+@keyframes home-intro-walk-head {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  25%, 75% {
+    transform: translateX(-50%) translateY(-3px);
+  }
+  50% {
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes home-intro-walk-leg-left {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(22deg);
+  }
+  50% {
+    transform: rotate(0deg);
+  }
+  75% {
+    transform: rotate(-22deg);
+  }
+}
+
+@keyframes home-intro-walk-leg-right {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-22deg);
+  }
+  50% {
+    transform: rotate(0deg);
+  }
+  75% {
+    transform: rotate(22deg);
+  }
+}
