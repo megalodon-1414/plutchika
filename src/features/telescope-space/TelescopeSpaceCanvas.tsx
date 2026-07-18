@@ -34,13 +34,27 @@ import {
   type TelescopeFocusCameraPose,
 } from './focusCameraView';
 import {
+  computeTelescopeRegionCameraPose,
+  getTelescopeRegionDefinition,
+  TELESCOPE_REGION_VIEW,
+  type TelescopeRegionDefinition,
+} from './layer3Region';
+import {
+  computeTelescopeExplorationCameraPose,
+  getTelescopeRegionPlotPosition,
+  TELESCOPE_EXPLORATION_VIEW,
+} from './layer4Exploration';
+import {
   TelescopeGalaxyLayer,
+  type TelescopeRegionIndicatorState,
+  type TelescopeSegmentFocusState,
   type TelescopeViewFocus,
 } from './TelescopeGalaxyLayer';
 
 interface TelescopeSpaceCanvasProps {
   zoomPhase: TelescopeZoomPhase;
   focusBasicId: BasicEmotionId | null;
+  selectedDyadId: EmotionId | null;
   wordPlots: readonly UserPlotRow[];
   viewFocus: TelescopeViewFocus;
   onZoomComplete?: (phase: TelescopeSettledPhase) => void;
@@ -48,6 +62,13 @@ interface TelescopeSpaceCanvasProps {
   onLayer2RotationComplete?: () => void;
   onViewFocus?: (focus: TelescopeViewFocus) => void;
   onMinimapSync?: (state: MinimapSyncState | null) => void;
+  /** レイヤー3の現在位置インジケータ（画面固定 HUD）との共有状態 */
+  regionIndicator?: { current: TelescopeRegionIndicatorState };
+  /** レイヤー3の中央検知区画（レイヤー4入口） */
+  segmentFocus?: { current: TelescopeSegmentFocusState };
+  /** レイヤー4で選択中の感情点 */
+  explorationPlotId?: string | null;
+  onSelectExplorationPlot?: (id: string) => void;
 }
 
 const PIVOT = new THREE.Vector3(...TELESCOPE_PIVOT);
@@ -60,7 +81,7 @@ const SURVEY_UP = new THREE.Vector3(0, 1, 0);
 const FOCUS_UP = new THREE.Vector3(...TELESCOPE_FOCUS_PLANE_UP);
 const REACT_SYNC_INTERVAL_MS = 1000 / 24;
 
-type CameraMode = 'survey' | 'focus';
+type CameraMode = 'survey' | 'focus' | 'region' | 'exploration';
 type ZoomInSubPhase = 'rotate' | 'focusIn';
 
 /**
@@ -250,6 +271,40 @@ function settleFocusCamera(
   applyFocusPose(camera, base, 0, 0);
 }
 
+function applyRegionPose(
+  camera: THREE.PerspectiveCamera,
+  region: TelescopeRegionDefinition,
+  progress: number,
+) {
+  const pose = computeTelescopeRegionCameraPose(region, progress);
+  camera.position.set(...pose.position);
+  TMP_LOOK.set(...pose.lookAt);
+  // バーを水平に保つため、レイヤー2と同じ平面法線を up にする。
+  camera.up.copy(FOCUS_UP);
+  camera.lookAt(TMP_LOOK);
+}
+
+function applyExplorationPose(
+  camera: THREE.PerspectiveCamera,
+  region: TelescopeRegionDefinition,
+  lookAt: [number, number, number],
+  offset?: THREE.Vector3,
+) {
+  if (offset && offset.lengthSq() > 1e-8) {
+    camera.position.set(
+      lookAt[0] + offset.x,
+      lookAt[1] + offset.y,
+      lookAt[2] + offset.z,
+    );
+  } else {
+    const pose = computeTelescopeExplorationCameraPose(region, lookAt);
+    camera.position.set(...pose.position);
+  }
+  TMP_LOOK.set(lookAt[0], lookAt[1], lookAt[2]);
+  camera.up.copy(FOCUS_UP);
+  camera.lookAt(TMP_LOOK);
+}
+
 function followSpeedMultiplier(errorDist: number): number {
   const progress = 1 - Math.min(1, errorDist / TELESCOPE_ORBIT_FOLLOW_RANGE);
   const bell = 6 * progress * (1 - progress);
@@ -259,18 +314,26 @@ function followSpeedMultiplier(errorDist: number): number {
 function TelescopeCameraController({
   zoomPhase,
   focusBasicId,
+  selectedDyadId,
+  wordPlots,
+  explorationPlotId,
   onZoomComplete,
   onCanvasClickZoom,
   onLayer2SceneChange,
   onLayer2RotationComplete,
+  onRegionProgressChange,
   onCameraStateChange,
 }: {
   zoomPhase: TelescopeZoomPhase;
   focusBasicId: BasicEmotionId | null;
+  selectedDyadId: EmotionId | null;
+  wordPlots: readonly UserPlotRow[];
+  explorationPlotId?: string | null;
   onZoomComplete?: (phase: TelescopeSettledPhase) => void;
   onCanvasClickZoom?: () => void;
   onLayer2SceneChange?: (active: boolean) => void;
   onLayer2RotationComplete?: () => void;
+  onRegionProgressChange?: (progress: number) => void;
   onCameraStateChange?: (
     state: Pick<MinimapSyncState, 'cameraPosition' | 'cameraTarget' | 'cameraUp'>,
   ) => void;
@@ -289,6 +352,19 @@ function TelescopeCameraController({
   const focusBase = useRef<TelescopeFocusCameraPose | null>(null);
   const focusOrbitYaw = useRef(0);
   const focusOrbitPitch = useRef(0);
+  const regionDefinition = useRef<TelescopeRegionDefinition | null>(null);
+  const regionProgress = useRef(0.5);
+  const explorationOffset = useRef(new THREE.Vector3());
+  const explorationLook = useRef(new THREE.Vector3());
+  const lastExplorationPlotId = useRef<string | null>(null);
+  const explorationRetargeting = useRef(false);
+  const explorationFromLook = useRef(new THREE.Vector3());
+  const explorationToLook = useRef(new THREE.Vector3());
+  const explorationRetargetProgress = useRef(1);
+  const wordPlotsRef = useRef(wordPlots);
+  const explorationPlotIdRef = useRef(explorationPlotId);
+  wordPlotsRef.current = wordPlots;
+  explorationPlotIdRef.current = explorationPlotId;
 
   const progress = useRef(1);
   const animDurationMs = useRef(TELESCOPE_ZOOM_MS);
@@ -320,6 +396,7 @@ function TelescopeCameraController({
   const clickZoomRef = useRef(onCanvasClickZoom);
   const layer2SceneRef = useRef(onLayer2SceneChange);
   const rotationCompleteRef = useRef(onLayer2RotationComplete);
+  const regionProgressRef = useRef(onRegionProgressChange);
   const cameraStateRef = useRef(onCameraStateChange);
   const lastReactSyncAt = useRef(-Infinity);
   const lastReportedCamera = useRef<{
@@ -336,6 +413,7 @@ function TelescopeCameraController({
   clickZoomRef.current = onCanvasClickZoom;
   layer2SceneRef.current = onLayer2SceneChange;
   rotationCompleteRef.current = onLayer2RotationComplete;
+  regionProgressRef.current = onRegionProgressChange;
   cameraStateRef.current = onCameraStateChange;
   zoomPhaseRef.current = zoomPhase;
 
@@ -377,7 +455,9 @@ function TelescopeCameraController({
     onChange({
       // 俯瞰時は視線と銀河平面の交点を「現在地」にし、Layer2 では実カメラ XY を平面へ落とす
       cameraPosition:
-        mode.current === 'focus'
+        mode.current === 'focus' ||
+        mode.current === 'region' ||
+        mode.current === 'exploration'
           ? [camera.position.x, camera.position.y, 0]
           : intersectLookWithGalaxyPlane(camera.position, currentLookAt.current),
       cameraTarget: [0, 0, 0],
@@ -477,6 +557,111 @@ function TelescopeCameraController({
       progress.current = 0;
       animating.current = true;
       targetPhase.current = 'detail';
+    } else if (zoomPhase === 'entering-region' && selectedDyadId) {
+      const region = getTelescopeRegionDefinition(selectedDyadId, focusBasicId);
+      if (!region || !focusBase.current) {
+        return;
+      }
+      regionDefinition.current = region;
+      regionProgress.current = 0.5;
+      regionProgressRef.current?.(0.5);
+      applyFocusPose(
+        camera,
+        focusBase.current,
+        focusOrbitYaw.current,
+        focusOrbitPitch.current,
+      );
+      fromPos.current.copy(camera.position);
+      fromLook.current.copy(TMP_LOOK);
+      const pose = computeTelescopeRegionCameraPose(region, 0.5);
+      toPos.current.set(...pose.position);
+      toLook.current.set(...pose.lookAt);
+      fromFov.current = camera.fov;
+      toFov.current = TELESCOPE_REGION_VIEW.fov;
+      animKind.current = 'free';
+      animDurationMs.current = TELESCOPE_REGION_VIEW.moveMs;
+      progress.current = 0;
+      animating.current = true;
+      layer2SceneRef.current?.(false);
+      targetPhase.current = 'region';
+    } else if (zoomPhase === 'leaving-region') {
+      const region = regionDefinition.current;
+      if (!region || !focusBase.current) {
+        return;
+      }
+      applyRegionPose(camera, region, regionProgress.current);
+      fromPos.current.copy(camera.position);
+      fromLook.current.copy(TMP_LOOK);
+      toPos.current.set(...focusBase.current.position);
+      toLook.current.set(...focusBase.current.lookAt);
+      fromFov.current = camera.fov;
+      toFov.current = TELESCOPE_FOCUS_VIEW.fov;
+      animKind.current = 'free';
+      animDurationMs.current = TELESCOPE_REGION_VIEW.moveMs;
+      progress.current = 0;
+      animating.current = true;
+      targetPhase.current = 'detail';
+    } else if (
+      zoomPhase === 'entering-exploration' &&
+      selectedDyadId &&
+      explorationPlotId
+    ) {
+      const region =
+        regionDefinition.current ??
+        getTelescopeRegionDefinition(selectedDyadId, focusBasicId);
+      const plot = wordPlots.find((row) => row.word_id === explorationPlotId);
+      if (!region || !plot) {
+        return;
+      }
+      regionDefinition.current = region;
+      applyRegionPose(camera, region, regionProgress.current);
+      fromPos.current.copy(camera.position);
+      fromLook.current.copy(TMP_LOOK);
+      const lookAt = getTelescopeRegionPlotPosition(region, plot, 0);
+      const pose = computeTelescopeExplorationCameraPose(region, lookAt);
+      toPos.current.set(...pose.position);
+      toLook.current.set(...pose.lookAt);
+      explorationOffset.current
+        .set(...pose.position)
+        .sub(new THREE.Vector3(...pose.lookAt));
+      lastExplorationPlotId.current = explorationPlotId;
+      fromFov.current = camera.fov;
+      toFov.current = TELESCOPE_EXPLORATION_VIEW.fov;
+      animKind.current = 'free';
+      animDurationMs.current = TELESCOPE_EXPLORATION_VIEW.moveMs;
+      progress.current = 0;
+      animating.current = true;
+      targetPhase.current = 'exploration';
+    } else if (zoomPhase === 'leaving-exploration') {
+      const region = regionDefinition.current;
+      if (!region) {
+        return;
+      }
+      applyExplorationPose(
+        camera,
+        region,
+        [
+          explorationLook.current.x,
+          explorationLook.current.y,
+          explorationLook.current.z,
+        ],
+        explorationOffset.current,
+      );
+      fromPos.current.copy(camera.position);
+      fromLook.current.copy(TMP_LOOK);
+      const pose = computeTelescopeRegionCameraPose(
+        region,
+        regionProgress.current,
+      );
+      toPos.current.set(...pose.position);
+      toLook.current.set(...pose.lookAt);
+      fromFov.current = camera.fov;
+      toFov.current = TELESCOPE_REGION_VIEW.fov;
+      animKind.current = 'free';
+      animDurationMs.current = TELESCOPE_EXPLORATION_VIEW.moveMs;
+      progress.current = 0;
+      animating.current = true;
+      targetPhase.current = 'region';
     } else if (zoomPhase === 'zooming-out') {
       zoomInSubPhase.current = null;
       zoomInCameraLock.current = true;
@@ -530,6 +715,33 @@ function TelescopeCameraController({
       progress.current = 0;
       animating.current = true;
       targetPhase.current = 'far';
+    } else if (zoomPhase === 'region' && selectedDyadId) {
+      const region =
+        regionDefinition.current ??
+        getTelescopeRegionDefinition(selectedDyadId, focusBasicId);
+      if (region) {
+        regionDefinition.current = region;
+        mode.current = 'region';
+        zoomInCameraLock.current = false;
+        layer2SceneRef.current?.(false);
+        camera.fov = TELESCOPE_REGION_VIEW.fov;
+        camera.updateProjectionMatrix();
+        applyRegionPose(camera, region, regionProgress.current);
+        currentLookAt.current.copy(TMP_LOOK);
+      }
+    } else if (zoomPhase === 'exploration' && selectedDyadId) {
+      const region =
+        regionDefinition.current ??
+        getTelescopeRegionDefinition(selectedDyadId, focusBasicId);
+      if (region) {
+        regionDefinition.current = region;
+        mode.current = 'exploration';
+        zoomInCameraLock.current = false;
+        layer2SceneRef.current?.(false);
+        camera.fov = TELESCOPE_EXPLORATION_VIEW.fov;
+        camera.updateProjectionMatrix();
+        // 点間移動の追従は useFrame 側。ここではモード定着だけ行う。
+      }
     } else if (zoomPhase === 'detail' && focusBasicId) {
       mode.current = 'focus';
       zoomInSubPhase.current = null;
@@ -555,7 +767,7 @@ function TelescopeCameraController({
       targetTheta.current = 0;
       targetPhi.current = TELESCOPE_ORBIT_PHI_CENTER;
     }
-  }, [zoomPhase, focusBasicId, camera]);
+  }, [zoomPhase, focusBasicId, selectedDyadId, explorationPlotId, wordPlots, camera]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -603,11 +815,28 @@ function TelescopeCameraController({
         return;
       }
 
+      if (mode.current === 'region') {
+        // バーは画面水平（左=start、右=end）。右ドラッグで景色をつかんで左（start 側）へ進む。
+        regionProgress.current = THREE.MathUtils.clamp(
+          regionProgress.current - dx * TELESCOPE_REGION_VIEW.dragSensitivity,
+          TELESCOPE_REGION_VIEW.progressMin,
+          TELESCOPE_REGION_VIEW.progressMax,
+        );
+        regionProgressRef.current?.(regionProgress.current);
+        return;
+      }
+
+      // レイヤー4では点クリックで移動するため、ドラッグ見回しは無効
+      if (mode.current === 'exploration') {
+        return;
+      }
+
       if (mode.current === 'focus') {
         const sens = TELESCOPE_FOCUS_VIEW.orbitSensitivity;
+        // ドラッグ方向とカメラ回転を直感に合わせる（左右・上下を反転）
         const next = clampFocusOrbit(
-          focusOrbitYaw.current - dx * sens,
-          focusOrbitPitch.current - dy * sens,
+          focusOrbitYaw.current + dx * sens,
+          focusOrbitPitch.current + dy * sens,
         );
         focusOrbitYaw.current = next.yaw;
         focusOrbitPitch.current = next.pitch;
@@ -636,7 +865,11 @@ function TelescopeCameraController({
       } catch {
         // already released
       }
-      if (!dragged && !animating.current) {
+      if (
+        !dragged &&
+        !animating.current &&
+        mode.current !== 'exploration'
+      ) {
         clickZoomRef.current?.();
       }
     };
@@ -656,7 +889,7 @@ function TelescopeCameraController({
     };
   }, [gl]);
 
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     if (!(camera instanceof THREE.PerspectiveCamera)) {
       return;
     }
@@ -690,6 +923,14 @@ function TelescopeCameraController({
               FOCUS_UP,
               eased,
             ).normalize();
+          } else if (
+            zoomPhaseRef.current === 'entering-region' ||
+            zoomPhaseRef.current === 'leaving-region' ||
+            zoomPhaseRef.current === 'entering-exploration' ||
+            zoomPhaseRef.current === 'leaving-exploration'
+          ) {
+            // レイヤー3/4もレイヤー2と同じ平面法線 up を使う
+            TMP_UP.copy(FOCUS_UP);
           } else if (zoomPhaseRef.current === 'zooming-out') {
             TMP_UP.lerpVectors(FOCUS_UP, SURVEY_UP, eased).normalize();
           } else {
@@ -748,8 +989,25 @@ function TelescopeCameraController({
           completedRef.current?.('detail');
           return;
         }
-        if (targetPhase.current === 'detail') {
+        if (targetPhase.current === 'region') {
+          mode.current = 'region';
+          if (regionDefinition.current) {
+            applyRegionPose(
+              camera,
+              regionDefinition.current,
+              regionProgress.current,
+            );
+            currentLookAt.current.copy(TMP_LOOK);
+          }
+        } else if (targetPhase.current === 'exploration') {
+          mode.current = 'exploration';
+          explorationLook.current.copy(toLook.current);
+          explorationOffset.current
+            .copy(toPos.current)
+            .sub(toLook.current);
+        } else if (targetPhase.current === 'detail') {
           mode.current = 'focus';
+          layer2SceneRef.current?.(true);
         } else if (targetPhase.current === 'wide') {
           mode.current = 'survey';
           focusBase.current = null;
@@ -772,6 +1030,79 @@ function TelescopeCameraController({
     }
 
     if (zoomInCameraLock.current) {
+      reportMinimapCamera(camera);
+      return;
+    }
+
+    if (mode.current === 'region' && regionDefinition.current) {
+      applyRegionPose(
+        camera,
+        regionDefinition.current,
+        regionProgress.current,
+      );
+      currentLookAt.current.copy(TMP_LOOK);
+      reportMinimapCamera(camera);
+      return;
+    }
+
+    if (mode.current === 'exploration' && regionDefinition.current) {
+      const plotId = explorationPlotIdRef.current;
+      const plot = plotId
+        ? wordPlotsRef.current.find((row) => row.word_id === plotId)
+        : null;
+      if (plot) {
+        const lookAt = getTelescopeRegionPlotPosition(
+          regionDefinition.current,
+          plot,
+          clock.elapsedTime,
+        );
+
+        if (
+          lastExplorationPlotId.current &&
+          lastExplorationPlotId.current !== plotId
+        ) {
+          explorationFromLook.current.copy(explorationLook.current);
+          explorationToLook.current.set(...lookAt);
+          explorationRetargetProgress.current = 0;
+          explorationRetargeting.current = true;
+          lastExplorationPlotId.current = plotId ?? null;
+        } else if (!lastExplorationPlotId.current) {
+          lastExplorationPlotId.current = plotId ?? null;
+        }
+
+        if (explorationRetargeting.current) {
+          explorationRetargetProgress.current = Math.min(
+            1,
+            explorationRetargetProgress.current +
+              delta / (TELESCOPE_EXPLORATION_VIEW.moveMs / 1000),
+          );
+          const t = explorationRetargetProgress.current;
+          const eased = t * t * (3 - 2 * t);
+          explorationLook.current.lerpVectors(
+            explorationFromLook.current,
+            explorationToLook.current,
+            eased,
+          );
+          if (t >= 1) {
+            explorationRetargeting.current = false;
+            explorationLook.current.set(...lookAt);
+          }
+        } else {
+          explorationLook.current.set(...lookAt);
+        }
+
+        applyExplorationPose(
+          camera,
+          regionDefinition.current,
+          [
+            explorationLook.current.x,
+            explorationLook.current.y,
+            explorationLook.current.z,
+          ],
+          explorationOffset.current,
+        );
+        currentLookAt.current.copy(TMP_LOOK);
+      }
       reportMinimapCamera(camera);
       return;
     }
@@ -980,15 +1311,25 @@ function Starfield() {
 function DetailVisibilityBridge({
   zoomPhase,
   focusBasicId,
+  selectedDyadId,
   wordPlots,
   layer2SceneActive,
   onViewFocus,
+  regionIndicator,
+  segmentFocus,
+  explorationPlotId,
+  onSelectExplorationPlot,
 }: {
   zoomPhase: TelescopeZoomPhase;
   focusBasicId: BasicEmotionId | null;
+  selectedDyadId: EmotionId | null;
   wordPlots: readonly UserPlotRow[];
   layer2SceneActive: boolean;
   onViewFocus?: (focus: TelescopeViewFocus) => void;
+  regionIndicator?: { current: TelescopeRegionIndicatorState };
+  segmentFocus?: { current: TelescopeSegmentFocusState };
+  explorationPlotId?: string | null;
+  onSelectExplorationPlot?: (id: string) => void;
 }) {
   const { camera } = useThree();
   const [visibility, setVisibility] = useState(
@@ -1062,8 +1403,13 @@ function DetailVisibilityBridge({
       detailVisibility={visibility}
       layer2SceneActive={layer2SceneActive}
       focusBasicId={focusBasicId}
+      selectedDyadId={selectedDyadId}
       wordPlots={wordPlots}
       onViewFocus={onViewFocus}
+      regionIndicator={regionIndicator}
+      segmentFocus={segmentFocus}
+      explorationPlotId={explorationPlotId}
+      onSelectExplorationPlot={onSelectExplorationPlot}
     />
   );
 }
@@ -1071,6 +1417,7 @@ function DetailVisibilityBridge({
 export function TelescopeSpaceCanvas({
   zoomPhase,
   focusBasicId,
+  selectedDyadId,
   wordPlots,
   viewFocus,
   onZoomComplete,
@@ -1078,6 +1425,10 @@ export function TelescopeSpaceCanvas({
   onLayer2RotationComplete,
   onViewFocus,
   onMinimapSync,
+  regionIndicator,
+  segmentFocus,
+  explorationPlotId = null,
+  onSelectExplorationPlot,
 }: TelescopeSpaceCanvasProps) {
   const [layer2SceneActive, setLayer2SceneActive] = useState(false);
   const [cameraState, setCameraState] = useState<Pick<
@@ -1127,6 +1478,9 @@ export function TelescopeSpaceCanvas({
       <TelescopeCameraController
         zoomPhase={zoomPhase}
         focusBasicId={focusBasicId}
+        selectedDyadId={selectedDyadId}
+        wordPlots={wordPlots}
+        explorationPlotId={explorationPlotId}
         onZoomComplete={onZoomComplete}
         onCanvasClickZoom={onCanvasClickZoom}
         onLayer2SceneChange={setLayer2SceneActive}
@@ -1146,9 +1500,14 @@ export function TelescopeSpaceCanvas({
       <DetailVisibilityBridge
         zoomPhase={zoomPhase}
         focusBasicId={focusBasicId}
+        selectedDyadId={selectedDyadId}
         wordPlots={wordPlots}
         layer2SceneActive={layer2SceneActive}
         onViewFocus={onViewFocus}
+        regionIndicator={regionIndicator}
+        segmentFocus={segmentFocus}
+        explorationPlotId={explorationPlotId}
+        onSelectExplorationPlot={onSelectExplorationPlot}
       />
     </Canvas>
   );

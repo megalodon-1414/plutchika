@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getEmotionById, type EmotionId } from '../../data/emotions';
+import type { TelescopeRegionIndicatorState } from './TelescopeGalaxyLayer';
 import type {
   TelescopeNearbyEmotionGlow,
   TelescopeViewFocus,
@@ -9,6 +10,8 @@ interface TelescopeEyepieceHudProps {
   focus: TelescopeViewFocus;
   visible: boolean;
   detailMode?: boolean;
+  /** レイヤー3（領域ビュー）— 中央の十字星をバー平面に沿わせて倒す */
+  regionMode?: boolean;
   selectedEmotion?: { label: string; color: string } | null;
 }
 
@@ -33,6 +36,7 @@ export function TelescopeInnerTrackLabel({
   focus,
   visible,
   detailMode = false,
+  regionMode = false,
   selectedEmotion = null,
 }: TelescopeEyepieceHudProps) {
   const emotion = focus.nearest;
@@ -111,6 +115,7 @@ export function TelescopeInnerTrackLabel({
           centerY={trackCenterY}
           color={trackColor}
           thin={idle}
+          flattened={regionMode}
         />
 
         <svg
@@ -121,10 +126,14 @@ export function TelescopeInnerTrackLabel({
           style={{
             position: 'absolute',
             left: '50%',
-            top: detailMode ? '46%' : '50%',
-            transform: detailMode
-              ? 'translate(-50%, -50%) perspective(180px) rotateX(62deg) scale(1.35)'
-              : 'translate(-50%, -50%) perspective(180px) rotateX(0deg) scale(1)',
+            top: regionMode ? '50%' : detailMode ? '46%' : '50%',
+            // regionMode はレイヤー3カメラの仰角（≒35°）に合わせ、
+            // バー平面と平行に見えるよう約55°倒す
+            transform: regionMode
+              ? 'translate(-50%, -50%) perspective(180px) rotateX(55deg) scale(1.3)'
+              : detailMode
+                ? 'translate(-50%, -50%) perspective(180px) rotateX(62deg) scale(1.35)'
+                : 'translate(-50%, -50%) perspective(180px) rotateX(0deg) scale(1)',
             transformOrigin: 'center',
             transformStyle: 'preserve-3d',
             overflow: 'visible',
@@ -291,11 +300,14 @@ function TrackCircle({
   centerY,
   color,
   thin = false,
+  flattened = false,
 }: {
   size: string;
   centerY: number;
   color: string;
   thin?: boolean;
+  /** レイヤー3: 空間の平面と平行に見えるよう縦に潰して楕円にする */
+  flattened?: boolean;
 }) {
   return (
     <div
@@ -306,14 +318,17 @@ function TrackCircle({
         top: `${centerY * 100}%`,
         width: size,
         height: size,
-        transform: 'translate(-50%, -50%)',
+        // カメラ仰角（≒35°）から見た平面上の円 ≒ 縦 cos55° に潰れた楕円
+        transform: flattened
+          ? 'translate(-50%, -50%) scaleY(0.57)'
+          : 'translate(-50%, -50%) scaleY(1)',
         borderRadius: '50%',
         border: thin ? `1px solid ${color}` : `1.5px solid ${color}`,
         opacity: thin ? 0.7 : 0.85,
         boxShadow: thin
           ? `0 0 6px ${color}22`
           : `0 0 10px ${color}44, inset 0 0 12px ${color}22`,
-        transition: `${TRACK_LAYOUT_TRANSITION}, border-color 0.35s ease, box-shadow 0.35s ease, opacity 0.35s ease`,
+        transition: `${TRACK_LAYOUT_TRANSITION}, transform 720ms cubic-bezier(0.22, 0.61, 0.36, 1), border-color 0.35s ease, box-shadow 0.35s ease, opacity 0.35s ease`,
       }}
     />
   );
@@ -491,6 +506,158 @@ export function TelescopeRimEmotionIcons({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/** レイヤー3 現在位置インジケータの線の長さ（px） */
+const REGION_INDICATOR_LENGTH_PX = 270;
+/** バーの画面上の傾きへ加える追加チルト（+で左端が上がる、ラジアン） */
+const REGION_INDICATOR_EXTRA_TILT_RAD = 0.2;
+
+/**
+ * レイヤー3の現在位置インジケータ（画面固定 HUD）。
+ * Canvas 側のレポーターが書き込む共有状態を rAF で読み取り、
+ * バーの画面上の傾きと同じ角度の線分＋現在位置マーカーを描く。
+ */
+export function TelescopeRegionPositionHud({
+  state,
+}: {
+  state: { readonly current: TelescopeRegionIndicatorState };
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const rotateRef = useRef<HTMLDivElement>(null);
+  const lineRef = useRef<HTMLDivElement>(null);
+  const startDotRef = useRef<HTMLDivElement>(null);
+  const endDotRef = useRef<HTMLDivElement>(null);
+  const midDotRef = useRef<HTMLDivElement>(null);
+  const markerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      frame = requestAnimationFrame(tick);
+      const shared = state.current;
+      const root = rootRef.current;
+      const rotate = rotateRef.current;
+      const line = lineRef.current;
+      const startDot = startDotRef.current;
+      const endDot = endDotRef.current;
+      const midDot = midDotRef.current;
+      const marker = markerRef.current;
+      if (
+        !root ||
+        !rotate ||
+        !line ||
+        !startDot ||
+        !endDot ||
+        !midDot ||
+        !marker
+      ) {
+        return;
+      }
+      const opacity = shared.active ? shared.reveal : 0;
+      root.style.opacity = opacity.toFixed(3);
+      if (opacity <= 0.001) {
+        return;
+      }
+      rotate.style.transform = `rotate(${
+        shared.angle + REGION_INDICATOR_EXTRA_TILT_RAD
+      }rad)`;
+      line.style.background = `linear-gradient(90deg, ${shared.startColor}, ${shared.endColor})`;
+      startDot.style.background = shared.startColor;
+      endDot.style.background = shared.endColor;
+      midDot.style.background = shared.midColor;
+      midDot.style.boxShadow = `0 0 8px ${shared.midColor}aa`;
+      marker.style.left = `${shared.progress * REGION_INDICATOR_LENGTH_PX}px`;
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [state]);
+
+  return (
+    <div
+      ref={rootRef}
+      style={{
+        width: REGION_INDICATOR_LENGTH_PX,
+        opacity: 0,
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        ref={rotateRef}
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: 0,
+          transformOrigin: 'center',
+        }}
+      >
+        <div
+          ref={lineRef}
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: -2,
+            height: 4,
+            borderRadius: 2,
+            opacity: 0.75,
+          }}
+        />
+        <div
+          ref={startDotRef}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: 13,
+            height: 13,
+            borderRadius: '50%',
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
+        <div
+          ref={endDotRef}
+          style={{
+            position: 'absolute',
+            left: '100%',
+            top: 0,
+            width: 13,
+            height: 13,
+            borderRadius: '50%',
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
+        {/* 中央（progress 0.5）= 24感情の位置 */}
+        <div
+          ref={midDotRef}
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: 0,
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
+        <div
+          ref={markerRef}
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: 0,
+            width: 25,
+            height: 25,
+            borderRadius: '50%',
+            border: '2.5px solid rgba(255, 255, 255, 0.92)',
+            background: 'rgba(255, 255, 255, 0.14)',
+            boxShadow: '0 0 12px rgba(255, 255, 255, 0.4)',
+            transform: 'translate(-50%, -50%)',
+          }}
+        />
       </div>
     </div>
   );

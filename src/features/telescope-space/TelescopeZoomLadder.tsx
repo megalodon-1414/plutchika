@@ -1,11 +1,19 @@
 import type { TelescopeSettledPhase } from './constants';
 
-const ZOOM_LEVELS: readonly TelescopeSettledPhase[] = ['far', 'wide', 'detail'];
+const ZOOM_LEVELS: readonly TelescopeSettledPhase[] = [
+  'far',
+  'wide',
+  'detail',
+  'region',
+  'exploration',
+];
 
 const LEVEL_LABEL: Record<TelescopeSettledPhase, string> = {
   far: '遠景',
   wide: '銀河',
   detail: '詳細',
+  region: '領域',
+  exploration: '探索',
 };
 
 /** 感情を選んだときのレイヤー（LAYER 01 → 02 遷移時） */
@@ -30,6 +38,10 @@ interface TelescopeZoomLadderProps {
   onRetreatTo: (level: TelescopeSettledPhase) => void;
   /** 詳細へ進むときに選んだ感情（選択時レイヤー円の左隣に表示） */
   selectedEmotion?: TelescopeZoomLadderEmotion | null;
+  /** Layer3へ進むときに選んだ合成感情 */
+  selectedDetailEmotion?: TelescopeZoomLadderEmotion | null;
+  /** Layer4へ進むときに選んだ感情点 */
+  selectedExplorationEmotion?: TelescopeZoomLadderEmotion | null;
 }
 
 /** 各文字の下側を円の中心へ向けたまま、反時計回りに周回する。 */
@@ -100,6 +112,8 @@ export function TelescopeZoomLadder({
   busy,
   onRetreatTo,
   selectedEmotion = null,
+  selectedDetailEmotion = null,
+  selectedExplorationEmotion = null,
 }: TelescopeZoomLadderProps) {
   const currentIndex = ZOOM_LEVELS.indexOf(current);
   const previousLevel =
@@ -167,6 +181,14 @@ export function TelescopeZoomLadder({
         const canRetreat = !busy && index < currentIndex;
         const showSelectedEmotion =
           Boolean(selectedEmotion) && level === SELECTION_LAYER;
+        const slotEmotion =
+          showSelectedEmotion
+            ? selectedEmotion
+            : level === 'detail'
+              ? selectedDetailEmotion
+              : level === 'region'
+                ? selectedExplorationEmotion
+                : null;
 
         return (
           <div
@@ -181,14 +203,14 @@ export function TelescopeZoomLadder({
               height: LEVEL_SLOT_SIZE,
             }}
           >
-            {showSelectedEmotion && selectedEmotion ? (
+            {slotEmotion ? (
               <span
                 style={{
                   position: 'absolute',
                   right: 'calc(100% + 20px)',
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  color: selectedEmotion.color,
+                  color: slotEmotion.color,
                   fontSize: '0.72rem',
                   fontWeight: 650,
                   letterSpacing: '0.1em',
@@ -197,7 +219,7 @@ export function TelescopeZoomLadder({
                   pointerEvents: 'none',
                 }}
               >
-                {selectedEmotion.label}
+                {slotEmotion.label}
               </span>
             ) : null}
 

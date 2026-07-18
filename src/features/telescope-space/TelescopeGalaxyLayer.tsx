@@ -1,16 +1,20 @@
-import { Billboard, Text } from '@react-three/drei';
+import { Billboard, Html, Line, Text } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import * as THREE from 'three';
-import type { BasicEmotionId } from '../../data/emotions';
+import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import {
   DYAD_EMOTIONS,
   findDyadByComponents,
   getBasicEmotion,
+  getEmotionById,
   isBasicEmotionId,
 } from '../../data/emotions';
 import type { UserPlotRow } from '../../types/userPlot';
 import { blendHex } from '../../utils/emotionColor';
+import { isPurePlot } from '../../utils/emotionPlotBridge';
+import { plotColorFromRow } from '../../utils/plotFromUserPlot';
+import { getTelescopePlotPosition } from './telescopePlotLayout';
 import {
   TELESCOPE_BASIC_SPHERE_RADIUS,
   TELESCOPE_DYAD_SPHERE_RADIUS,
@@ -21,6 +25,21 @@ import {
   type TelescopeZoomPhase,
 } from './constants';
 import { getRelatedFocusNodeIds, getDyadPartnerBasicIds } from './focusCameraView';
+import {
+  getTelescopeRegionDefinition,
+  telescopeRegionToUnifiedSpace,
+  TELESCOPE_REGION_VIEW,
+  type TelescopeRegionDefinition,
+} from './layer3Region';
+import {
+  getLayer3SegmentLayout,
+  groupPlotsByLayer3Segment,
+  LAYER3_BAR_HIGHLIGHT_RADIUS_NDC,
+  LAYER3_BAR_MID_SEGMENT_COUNT,
+  LAYER3_BAR_SEGMENT_GAP,
+  LAYER3_PURE_SEGMENT_RADIUS_RATIO,
+} from './layer3Segments';
+import { Layer4ExplorationLayer } from './Layer4ExplorationLayer';
 import { TelescopeWordPlotLayer } from './TelescopeWordPlotLayer';
 import type {
   TelescopeNearestEmotion,
@@ -41,8 +60,13 @@ const LAYER2_BASIC_FLOOR_RADIUS = TELESCOPE_BASIC_SPHERE_RADIUS;
 const LAYER2_DYAD_FLOOR_RADIUS = TELESCOPE_DYAD_SPHERE_RADIUS * 1.15;
 const LAYER2_FLOOR_MARKER_Z = -0.14;
 const LAYER2_BAR_FOCUS_RADIUS_NDC = 0.3;
+/** Layer2 回転ラベルの一周秒数（小さいほど速い） */
+const LAYER2_LABEL_ORBIT_PERIOD_S = 18;
+/** カメラ中央がこの NDC 半径内ならラベルを「選択中」とみなす */
+const LAYER2_LABEL_SELECT_RADIUS_NDC = 0.22;
 const _barProjectedStart = new THREE.Vector3();
 const _barProjectedEnd = new THREE.Vector3();
+const _labelProjected = new THREE.Vector3();
 
 function seededRandom(seed: string): () => number {
   let state = 2166136261;
@@ -363,7 +387,8 @@ function EmotionStar({
     }
     const t = state.clock.elapsedTime;
     if (orbitLabelRef.current) {
-      orbitLabelRef.current.rotation.z = -(t * (Math.PI * 2)) / 28;
+      orbitLabelRef.current.rotation.z =
+        -(t * (Math.PI * 2)) / LAYER2_LABEL_ORBIT_PERIOD_S;
     }
   });
 
@@ -891,26 +916,73 @@ function Layer2RadialGrid() {
 function Layer2EmotionLabel({
   node,
   color,
+  trackRadius = TELESCOPE_DYAD_SPHERE_RADIUS * 1.4,
+  fontSize = 0.065,
+  reveal,
+  revealAlongT = 1,
 }: {
   node: TelescopeNodePosition;
   color: string;
+  trackRadius?: number;
+  fontSize?: number;
+  /** レイヤー3の入場スイープ。指定時は波面通過に合わせて成長して現れる */
+  reveal?: { readonly current: number };
+  revealAlongT?: number;
 }) {
+  const rootRef = useRef<THREE.Group>(null);
   const orbitRef = useRef<THREE.Group>(null);
-  const trackRadius = TELESCOPE_DYAD_SPHERE_RADIUS * 1.9;
+  const centerDotRef = useRef<THREE.Mesh>(null);
+  const centerDotRadius = trackRadius * 0.22;
   const initialPhase = useMemo(
     () => seededRandom(`label:${node.id}`)() * Math.PI * 2,
     [node.id],
   );
+  const selectedBlend = useRef(0);
 
-  useFrame(({ clock }) => {
+  useFrame(({ camera, clock }, delta) => {
     if (orbitRef.current) {
       orbitRef.current.rotation.z =
-        initialPhase - (clock.elapsedTime * Math.PI * 2) / 28;
+        initialPhase -
+        (clock.elapsedTime * Math.PI * 2) / LAYER2_LABEL_ORBIT_PERIOD_S;
+    }
+
+    if (reveal && rootRef.current) {
+      const factor = layer3RevealFactor(reveal.current, revealAlongT);
+      const smooth = factor * factor * (3 - 2 * factor);
+      rootRef.current.visible = factor > 0.001;
+      rootRef.current.scale.setScalar(Math.max(0.0001, smooth));
+    }
+
+    _labelProjected.set(node.position[0], node.position[1], node.position[2]);
+    _labelProjected.project(camera);
+    const onScreen =
+      _labelProjected.z >= -1 &&
+      _labelProjected.z <= 1 &&
+      Math.hypot(_labelProjected.x, _labelProjected.y) <=
+        LAYER2_LABEL_SELECT_RADIUS_NDC;
+    selectedBlend.current = THREE.MathUtils.damp(
+      selectedBlend.current,
+      onScreen ? 1 : 0,
+      10,
+      delta,
+    );
+
+    const dot = centerDotRef.current;
+    if (dot) {
+      const blend = selectedBlend.current;
+      dot.visible = blend > 0.02;
+      dot.scale.setScalar(0.65 + blend * 0.45);
+      const material = dot.material as THREE.MeshBasicMaterial;
+      material.opacity = 0.15 + blend * 0.8;
     }
   });
 
   return (
-    <group position={node.position}>
+    <group
+      ref={rootRef}
+      position={node.position}
+      visible={!reveal}
+    >
       <Billboard follow lockX={false} lockY={false} lockZ={false}>
         <mesh>
           <ringGeometry
@@ -924,11 +996,21 @@ function Layer2EmotionLabel({
             toneMapped={false}
           />
         </mesh>
+        <mesh ref={centerDotRef} visible={false}>
+          <circleGeometry args={[centerDotRadius, 28]} />
+          <meshBasicMaterial
+            color={color}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
         <group ref={orbitRef}>
           <Text
             position={[trackRadius, 0, 0]}
             rotation={[0, 0, -Math.PI / 2]}
-            fontSize={0.065}
+            fontSize={fontSize}
             color={color}
             anchorX="center"
             anchorY="middle"
@@ -973,6 +1055,1030 @@ function Layer2RelatedEmotionLabels({
   );
 }
 
+/**
+ * レイヤー3: 帯を両端の感情球の外側へ延長する量（片側）。
+ * 端の丸みの中心が感情ノードと一致し、円形セグメントが内接する値。
+ */
+const LAYER3_REGION_LENGTH_PAD = 0.34;
+const LAYER3_PLOT_BASE_Z = 0.02;
+const LAYER3_PLOT_RADIUS = 0.024;
+const LAYER3_PLOT_LIFT = 0.2;
+/** バー長手方向の持ち上げ範囲（狭くして選択位置付近だけ上げる） */
+const LAYER3_PLOT_LIFT_ALONG = 0.28;
+/** バー幅方向の持ち上げ範囲（幅方向に並んだ点はまとめて上がる） */
+const LAYER3_PLOT_LIFT_PERP = TELESCOPE_REGION_VIEW.regionHalfWidth * 2.2;
+const LAYER3_PLOT_LIFT_CURVE = 1.4;
+const LAYER3_PLOT_CAPTURE_NDC = 0.3;
+const LAYER3_PLOT_LIFT_SPEED = 8;
+const LAYER3_BAR_HIGHLIGHT_SPEED = 9;
+/** 公転する純粋感情プロットの軌跡パーティクル数と時間間隔 */
+const LAYER3_TRAIL_COUNT = 10;
+const LAYER3_TRAIL_STEP_S = 2.4;
+/** パーティクルの持ち上げ追従速度（本体の 8 よりゆっくり） */
+const LAYER3_TRAIL_LIFT_SPEED = 3.2;
+/** 後方パーティクルほど追従が遅れる度合い */
+const LAYER3_TRAIL_LIFT_LAG = 0.22;
+/** イ形容詞ラベルの引き出し線の先端（バー方向＝画面右寄り＋Z上方） */
+const LAYER3_LABEL_LEADER_ALONG = 0.14;
+const LAYER3_LABEL_LEADER_UP = 0.36;
+const LAYER3_LABEL_FADE_SPEED = 9;
+/** プロット点の疑似影を落とす面の高さ（帯のすぐ上） */
+const LAYER3_SHADOW_WORLD_Z = -0.07;
+/** バーの全長（両端の延長込み） */
+const LAYER3_STRIP_LENGTH =
+  TELESCOPE_REGION_VIEW.spanLength + LAYER3_REGION_LENGTH_PAD * 2;
+/** 入場演出: 手前（end）側の端から奥へ掃くようにフェードインする */
+const LAYER3_REVEAL_DURATION_S = 1.3;
+/** 出現の波面のやわらかさ（バー全長比） */
+const LAYER3_REVEAL_SOFT = 0.35;
+const _layer3PlotProjected = new THREE.Vector3();
+
+/** 入場演出の進行度（0→1）。子コンポーネントは参照のみ */
+type Layer3RevealRef = { readonly current: number };
+
+/**
+ * 入場演出の出現係数。end（手前・画面右）側の端から start 側へ
+ * 波面が掃くように 0→1 へ立ち上がる。
+ */
+function layer3RevealFactor(revealT: number, alongT: number): number {
+  const delay = 1 - alongT;
+  const front = revealT * (1 + LAYER3_REVEAL_SOFT);
+  return THREE.MathUtils.clamp((front - delay) / LAYER3_REVEAL_SOFT, 0, 1);
+}
+
+/** 統一空間の座標 → バー方向の正規化位置（0=start側の延長端、1=end側の延長端） */
+function layer3AlongT(
+  region: TelescopeRegionDefinition,
+  x: number,
+  y: number,
+): number {
+  const along =
+    (x - region.start.position[0]) * region.direction[0] +
+    (y - region.start.position[1]) * region.direction[1];
+  return THREE.MathUtils.clamp(
+    (along + LAYER3_REGION_LENGTH_PAD) / LAYER3_STRIP_LENGTH,
+    0,
+    1,
+  );
+}
+
+interface Layer3LiftCenter {
+  captured: boolean;
+  x: number;
+  y: number;
+}
+
+/** 検知中心を頂点とする丘（幅方向に広く、長手方向に狭い）の高さを返す */
+function layer3LiftZ(
+  x: number,
+  y: number,
+  center: Layer3LiftCenter,
+  ux: number,
+  uy: number,
+): number {
+  if (!center.captured) {
+    return LAYER3_PLOT_BASE_Z;
+  }
+  const relX = x - center.x;
+  const relY = y - center.y;
+  const along = relX * ux + relY * uy;
+  const perp = ux * relY - uy * relX;
+  const elliptical = Math.hypot(
+    along / LAYER3_PLOT_LIFT_ALONG,
+    perp / LAYER3_PLOT_LIFT_PERP,
+  );
+  const proximity = THREE.MathUtils.clamp(1 - elliptical, 0, 1);
+  const smoothProximity = proximity * proximity * (3 - 2 * proximity);
+  return (
+    LAYER3_PLOT_BASE_Z +
+    LAYER3_PLOT_LIFT * Math.pow(smoothProximity, LAYER3_PLOT_LIFT_CURVE)
+  );
+}
+
+let _layer3ShadowTexture: THREE.DataTexture | null = null;
+
+/** 中心が濃く縁で消える放射グラデーションの影テクスチャ（共有・使い回し） */
+function getLayer3ShadowTexture(): THREE.DataTexture {
+  if (_layer3ShadowTexture) {
+    return _layer3ShadowTexture;
+  }
+  const size = 32;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (x + 0.5) / size - 0.5;
+      const dy = (y + 0.5) / size - 0.5;
+      const distance = Math.hypot(dx, dy) * 2;
+      const alpha = Math.max(0, 1 - distance);
+      const value = Math.round(alpha * alpha * 255);
+      const offset = (y * size + x) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  _layer3ShadowTexture = new THREE.DataTexture(
+    data,
+    size,
+    size,
+    THREE.RGBAFormat,
+  );
+  _layer3ShadowTexture.needsUpdate = true;
+  return _layer3ShadowTexture;
+}
+
+/**
+ * イ形容詞プロットの引き出し線＋縦書きラベル。
+ * 検知円に入ると引き出し線がフェードし、ラベルは下からフェードインする。
+ */
+function Layer3AdjectiveLeaderLabel({
+  word,
+  color,
+  leaderEnd,
+  shown,
+}: {
+  word: string;
+  color: string;
+  leaderEnd: [number, number, number];
+  shown: boolean;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const lineRef = useRef<ComponentRef<typeof Line>>(null);
+  const fade = useRef(0);
+
+  useFrame((_, delta) => {
+    const target = shown ? 1 : 0;
+    fade.current = THREE.MathUtils.lerp(
+      fade.current,
+      target,
+      1 - Math.exp(-LAYER3_LABEL_FADE_SPEED * delta),
+    );
+    const group = groupRef.current;
+    if (group) {
+      group.visible = shown || fade.current > 0.02;
+    }
+    const line = lineRef.current;
+    if (line) {
+      (line.material as THREE.Material).opacity = fade.current * 0.85;
+    }
+  });
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <Line
+        ref={lineRef}
+        points={[[0, 0, 0], leaderEnd]}
+        color={color}
+        lineWidth={1.2}
+        transparent
+        opacity={0}
+      />
+      <Html position={leaderEnd} zIndexRange={[1, 0]} style={{ pointerEvents: 'none' }}>
+        <div
+          className="font-momochidori font-momochidori--medium"
+          style={{
+            writingMode: 'vertical-rl',
+            textOrientation: 'upright',
+            whiteSpace: 'nowrap',
+            fontSize: 21,
+            letterSpacing: '0.12em',
+            color,
+            opacity: shown ? 1 : 0,
+            // ラベルの下端を引き出し線の先端に合わせる
+            transform: shown
+              ? 'translate(-50%, calc(-100% - 6px))'
+              : 'translate(-50%, calc(-100% + 8px))',
+            transition: 'opacity 320ms ease, transform 320ms ease',
+          }}
+        >
+          {word}
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+/** 公転する純粋感情プロットの後方に、過去位置をなぞる残像パーティクルを描く */
+function Layer3PurePlotTrail({
+  row,
+  color,
+  region,
+  liftCenter,
+  reveal,
+}: {
+  row: UserPlotRow;
+  color: string;
+  region: TelescopeRegionDefinition;
+  liftCenter: { readonly current: Layer3LiftCenter };
+  reveal: Layer3RevealRef;
+}) {
+  const meshRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const liftedZ = useRef<number[]>([]);
+
+  useFrame(({ clock }, delta) => {
+    const time = clock.elapsedTime;
+    const [ux, uy] = region.direction;
+    for (let index = 0; index < LAYER3_TRAIL_COUNT; index++) {
+      const mesh = meshRefs.current[index];
+      if (!mesh) {
+        continue;
+      }
+      const position = getTelescopePlotPosition(
+        row,
+        time - (index + 1) * LAYER3_TRAIL_STEP_S,
+      );
+      const [x, y] = telescopeRegionToUnifiedSpace(
+        region,
+        position[0],
+        position[1],
+      );
+      // パーティクルも丘に乗って持ち上がる。本体よりゆっくり追従させ、
+      // 後方ほど遅れて「ふわっ」と浮く。
+      const targetZ = layer3LiftZ(x, y, liftCenter.current, ux, uy);
+      const followSpeed =
+        LAYER3_TRAIL_LIFT_SPEED / (1 + index * LAYER3_TRAIL_LIFT_LAG);
+      const z = THREE.MathUtils.lerp(
+        liftedZ.current[index] ?? LAYER3_PLOT_BASE_Z,
+        targetZ,
+        1 - Math.exp(-followSpeed * delta),
+      );
+      liftedZ.current[index] = z;
+      mesh.position.set(x, y, z);
+
+      const fade = 1 - index / LAYER3_TRAIL_COUNT;
+      const revealFactor = layer3RevealFactor(
+        reveal.current,
+        layer3AlongT(region, x, y),
+      );
+      mesh.visible = revealFactor > 0.001;
+      (mesh.material as THREE.MeshBasicMaterial).opacity =
+        (0.06 + fade * 0.4) * revealFactor;
+    }
+  });
+
+  return (
+    <group>
+      {Array.from({ length: LAYER3_TRAIL_COUNT }, (_, index) => {
+        const fade = 1 - index / LAYER3_TRAIL_COUNT;
+        return (
+          <mesh
+            key={index}
+            ref={(mesh) => {
+              meshRefs.current[index] = mesh;
+            }}
+          >
+            <sphereGeometry
+              args={[LAYER3_PLOT_RADIUS * (0.3 + fade * 0.4), 8, 8]}
+            />
+            <meshBasicMaterial
+              color={color}
+              transparent
+              opacity={0.06 + fade * 0.4}
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+/**
+ * レイヤー3の単語プロット。水平面近くに置き、画面中央付近の
+ * バー幅方向の一列をまとめて持ち上げる（長手方向は狭い丘）。
+ * 純粋感情の点は感情球のまわりをゆっくり回転する。
+ */
+function Layer3RegionPlots({
+  plots,
+  region,
+  reveal,
+}: {
+  plots: readonly { row: UserPlotRow; color: string }[];
+  region: TelescopeRegionDefinition;
+  reveal: Layer3RevealRef;
+}) {
+  const groupRefs = useRef<(THREE.Group | null)[]>([]);
+  const shadowRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const liftedZ = useRef<number[]>([]);
+  const liftCenter = useRef<Layer3LiftCenter>({ captured: false, x: 0, y: 0 });
+  const shadowTexture = useMemo(getLayer3ShadowTexture, []);
+  const [shownLabelIds, setShownLabelIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  useFrame(({ camera, clock }, delta) => {
+    const time = clock.elapsedTime;
+    const [ux, uy] = region.direction;
+    const positions = plots.map((plot) => {
+      // 純粋感情のプロットは time で感情球のまわりを公転する
+      const real = getTelescopePlotPosition(plot.row, time);
+      return telescopeRegionToUnifiedSpace(region, real[0], real[1]);
+    });
+
+    let centeredIndex = -1;
+    let centeredDistance = Infinity;
+    const ndcDistances: number[] = [];
+    positions.forEach((position, index) => {
+      _layer3PlotProjected
+        .set(position[0], position[1], LAYER3_PLOT_BASE_Z)
+        .project(camera);
+      if (_layer3PlotProjected.z < -1 || _layer3PlotProjected.z > 1) {
+        ndcDistances[index] = Infinity;
+        return;
+      }
+      const distance =
+        _layer3PlotProjected.x ** 2 + _layer3PlotProjected.y ** 2;
+      ndcDistances[index] = distance;
+      if (distance < centeredDistance) {
+        centeredDistance = distance;
+        centeredIndex = index;
+      }
+    });
+
+    // 検知円内のイ形容詞プロットだけ引き出しラベルを表示する
+    const nextShown = new Set<string>();
+    plots.forEach((plot, index) => {
+      if (
+        plot.row.wordType === 'adjective' &&
+        (ndcDistances[index] ?? Infinity) <= LAYER3_PLOT_CAPTURE_NDC ** 2
+      ) {
+        nextShown.add(plot.row.word_id);
+      }
+    });
+    setShownLabelIds((previous) => {
+      if (
+        previous.size === nextShown.size &&
+        [...nextShown].every((id) => previous.has(id))
+      ) {
+        return previous;
+      }
+      return nextShown;
+    });
+
+    const captured =
+      centeredIndex >= 0 &&
+      centeredDistance <= LAYER3_PLOT_CAPTURE_NDC ** 2;
+    liftCenter.current.captured = captured;
+    liftCenter.current.x = captured ? positions[centeredIndex][0] : 0;
+    liftCenter.current.y = captured ? positions[centeredIndex][1] : 0;
+    const blend = 1 - Math.exp(-LAYER3_PLOT_LIFT_SPEED * delta);
+
+    positions.forEach((position, index) => {
+      const group = groupRefs.current[index];
+      if (!group) {
+        return;
+      }
+      // バー基準の楕円の丘：長手方向は狭く、幅方向は帯全体が同じ丘に乗る
+      const targetZ = layer3LiftZ(
+        position[0],
+        position[1],
+        liftCenter.current,
+        ux,
+        uy,
+      );
+      const z = THREE.MathUtils.lerp(
+        liftedZ.current[index] ?? LAYER3_PLOT_BASE_Z,
+        targetZ,
+        blend,
+      );
+      liftedZ.current[index] = z;
+      group.position.set(position[0], position[1], z);
+
+      // 入場スイープ：波面が通過するまで非表示、通過にあわせて成長させる
+      const revealFactor = layer3RevealFactor(
+        reveal.current,
+        layer3AlongT(region, position[0], position[1]),
+      );
+      group.visible = revealFactor > 0.001;
+      group.scale.setScalar(Math.max(0.0001, revealFactor));
+
+      // 疑似影：グループの上昇分を打ち消して帯のすぐ上に留める。
+      // 高く浮くほど影は広がって薄くなる。
+      const shadow = shadowRefs.current[index];
+      if (shadow) {
+        const lift = THREE.MathUtils.clamp(
+          (z - LAYER3_PLOT_BASE_Z) / LAYER3_PLOT_LIFT,
+          0,
+          1,
+        );
+        shadow.position.z = LAYER3_SHADOW_WORLD_Z - z;
+        shadow.scale.setScalar(1 + lift * 0.7);
+        (shadow.material as THREE.MeshBasicMaterial).opacity =
+          0.4 * (1 - lift * 0.45) * revealFactor;
+      }
+    });
+  });
+
+  const leaderEnd: [number, number, number] = [
+    region.direction[0] * LAYER3_LABEL_LEADER_ALONG,
+    region.direction[1] * LAYER3_LABEL_LEADER_ALONG,
+    LAYER3_LABEL_LEADER_UP,
+  ];
+
+  return (
+    <group>
+      {plots.map((plot, index) => (
+        <group
+          key={plot.row.word_id}
+          ref={(group) => {
+            groupRefs.current[index] = group;
+          }}
+          position={[0, 0, LAYER3_PLOT_BASE_Z]}
+        >
+          <mesh>
+            <sphereGeometry args={[LAYER3_PLOT_RADIUS, 12, 12]} />
+            <meshBasicMaterial color={plot.color} toneMapped={false} />
+          </mesh>
+          <mesh
+            ref={(shadow) => {
+              shadowRefs.current[index] = shadow;
+            }}
+            position={[0.018, -0.018, LAYER3_SHADOW_WORLD_Z - LAYER3_PLOT_BASE_Z]}
+          >
+            <circleGeometry args={[LAYER3_PLOT_RADIUS * 1.7, 20]} />
+            <meshBasicMaterial
+              color="#000000"
+              alphaMap={shadowTexture}
+              transparent
+              opacity={0.4}
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
+          {plot.row.wordType === 'adjective' ? (
+            <Layer3AdjectiveLeaderLabel
+              word={plot.row.word_id}
+              color={plot.color}
+              leaderEnd={leaderEnd}
+              shown={shownLabelIds.has(plot.row.word_id)}
+            />
+          ) : null}
+        </group>
+      ))}
+      {plots
+        .filter((plot) => isPurePlot(plot.row))
+        .map((plot) => (
+          <Layer3PurePlotTrail
+            key={`trail-${plot.row.word_id}`}
+            row={plot.row}
+            color={plot.color}
+            region={region}
+            liftCenter={liftCenter}
+            reveal={reveal}
+          />
+        ))}
+    </group>
+  );
+}
+
+/**
+ * レイヤー3のバーの区画。両端の純粋感情ゾーンは円形セグメント1つずつに
+ * まとめ、中央の混合領域は等間隔の矩形セグメントで区切る。
+ * プロットを含む区画だけ、区画中心が画面中央へ近づいたときに発光させる。
+ * 検知中の占有区画は segmentFocus へ報告する（レイヤー4入口）。
+ */
+function Layer3BarSegments({
+  region,
+  plots,
+  width,
+  startColor,
+  endColor,
+  reveal,
+  segmentFocus,
+}: {
+  region: TelescopeRegionDefinition;
+  plots: readonly { row: UserPlotRow; color: string }[];
+  width: number;
+  startColor: string;
+  endColor: string;
+  reveal: Layer3RevealRef;
+  segmentFocus?: { current: TelescopeSegmentFocusState };
+}) {
+  const materialRefs = useRef<(THREE.MeshBasicMaterial | null)[]>([]);
+  const dividerRefs = useRef<(THREE.MeshBasicMaterial | null)[]>([]);
+  const highlightBlend = useRef<number[]>([]);
+  const segments = useMemo(() => getLayer3SegmentLayout(width), [width]);
+  const pureRadius = width * LAYER3_PURE_SEGMENT_RADIUS_RATIO;
+  const halfSpan = TELESCOPE_REGION_VIEW.spanLength / 2;
+  const midHalf = halfSpan - pureRadius;
+  const segmentLength = (midHalf * 2) / LAYER3_BAR_MID_SEGMENT_COUNT;
+  const segmentCount = segments.length;
+
+  useEffect(() => {
+    if (!segmentFocus) {
+      return;
+    }
+    segmentFocus.current.active = true;
+    return () => {
+      segmentFocus.current.active = false;
+      segmentFocus.current.segmentIndex = null;
+      segmentFocus.current.plotIds = [];
+      segmentFocus.current.closeness = 0;
+    };
+  }, [segmentFocus]);
+
+  useFrame(({ camera, clock }, delta) => {
+    const bySegment = groupPlotsByLayer3Segment(
+      region,
+      plots.map((plot) => plot.row),
+      clock.elapsedTime,
+      width,
+    );
+    const occupied = new Array<boolean>(segmentCount).fill(false);
+    for (const [index, ids] of bySegment) {
+      if (ids.length > 0) {
+        occupied[index] = true;
+      }
+    }
+
+    const [ux, uy] = region.direction;
+    let bestIndex: number | null = null;
+    let bestCloseness = 0;
+
+    for (let index = 0; index < segmentCount; index++) {
+      const localX = segments[index].centerAlong;
+      const worldX = region.midpoint[0] + ux * localX;
+      const worldY = region.midpoint[1] + uy * localX;
+      _layer3PlotProjected
+        .set(worldX, worldY, LAYER3_PLOT_BASE_Z)
+        .project(camera);
+      const centerDistance = Math.hypot(
+        _layer3PlotProjected.x,
+        _layer3PlotProjected.y,
+      );
+      const onScreen =
+        _layer3PlotProjected.z >= -1 && _layer3PlotProjected.z <= 1;
+      const closeness = onScreen
+        ? THREE.MathUtils.clamp(
+            1 - centerDistance / LAYER3_BAR_HIGHLIGHT_RADIUS_NDC,
+            0,
+            1,
+          )
+        : 0;
+      const target = occupied[index] ? closeness : 0;
+      const blend = THREE.MathUtils.lerp(
+        highlightBlend.current[index] ?? 0,
+        target,
+        1 - Math.exp(-LAYER3_BAR_HIGHLIGHT_SPEED * delta),
+      );
+      highlightBlend.current[index] = blend;
+
+      if (occupied[index] && closeness > bestCloseness) {
+        bestCloseness = closeness;
+        bestIndex = index;
+      }
+
+      const revealFactor = layer3RevealFactor(
+        reveal.current,
+        localX / LAYER3_STRIP_LENGTH + 0.5,
+      );
+      const material = materialRefs.current[index];
+      if (material) {
+        material.opacity = blend * 0.62 * revealFactor;
+      }
+    }
+
+    if (segmentFocus) {
+      const shared = segmentFocus.current;
+      shared.segmentIndex =
+        bestIndex != null && bestCloseness > 0.05 ? bestIndex : null;
+      shared.plotIds =
+        shared.segmentIndex != null
+          ? [...(bySegment.get(shared.segmentIndex) ?? [])]
+          : [];
+      shared.closeness = bestCloseness;
+    }
+
+    for (
+      let index = 0;
+      index <= LAYER3_BAR_MID_SEGMENT_COUNT;
+      index++
+    ) {
+      const divider = dividerRefs.current[index];
+      if (divider) {
+        const localX = -midHalf + segmentLength * index;
+        divider.opacity =
+          0.42 *
+          layer3RevealFactor(
+            reveal.current,
+            localX / LAYER3_STRIP_LENGTH + 0.5,
+          );
+      }
+    }
+  });
+
+  return (
+    <group>
+      {[0, segmentCount - 1].map((segmentIndex) => (
+        <mesh
+          key={`pure-${segmentIndex}`}
+          position={[segments[segmentIndex].centerAlong, 0, 0.012]}
+        >
+          <circleGeometry args={[pureRadius - LAYER3_BAR_SEGMENT_GAP * 0.5, 40]} />
+          <meshBasicMaterial
+            ref={(material) => {
+              materialRefs.current[segmentIndex] = material;
+            }}
+            color={segmentIndex === 0 ? startColor : endColor}
+            transparent
+            opacity={0}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+      {Array.from({ length: LAYER3_BAR_MID_SEGMENT_COUNT }, (_, index) => {
+        const x = segments[index + 1].centerAlong;
+        const t = THREE.MathUtils.clamp(x / (halfSpan * 2) + 0.5, 0, 1);
+        return (
+          <mesh key={`highlight-${index}`} position={[x, 0, 0.012]}>
+            <planeGeometry
+              args={[
+                Math.max(0.01, segmentLength - LAYER3_BAR_SEGMENT_GAP),
+                width * 0.96,
+              ]}
+            />
+            <meshBasicMaterial
+              ref={(material) => {
+                materialRefs.current[index + 1] = material;
+              }}
+              color={blendHex(startColor, endColor, t)}
+              transparent
+              opacity={0}
+              depthWrite={false}
+              blending={THREE.AdditiveBlending}
+              toneMapped={false}
+            />
+          </mesh>
+        );
+      })}
+      {Array.from(
+        { length: LAYER3_BAR_MID_SEGMENT_COUNT + 1 },
+        (_, index) => {
+          const x = -midHalf + segmentLength * index;
+          return (
+            <mesh key={`divider-${index}`} position={[x, 0, 0.014]}>
+              <planeGeometry
+                args={[LAYER3_BAR_SEGMENT_GAP, width * 0.94]}
+              />
+              <meshBasicMaterial
+                ref={(material) => {
+                  dividerRefs.current[index] = material;
+                }}
+                color="#090b13"
+                transparent
+                opacity={0}
+                depthWrite={false}
+                toneMapped={false}
+              />
+            </mesh>
+          );
+        },
+      )}
+    </group>
+  );
+}
+
+/**
+ * レイヤー3の現在位置インジケータ用の共有状態。
+ * Canvas 内のレポーターが毎フレーム書き込み、DOM 側の HUD が読み取る。
+ */
+export interface TelescopeRegionIndicatorState {
+  /** レイヤー3表示中か（false なら HUD は非表示） */
+  active: boolean;
+  /** バーの画面上の傾き（ラジアン） */
+  angle: number;
+  /** 現在位置（0=start、1=end。progressMin〜progressMax の範囲） */
+  progress: number;
+  /** 入場演出の進行度（HUD のフェードに使う） */
+  reveal: number;
+  startColor: string;
+  endColor: string;
+  /** 中央（progress 0.5）にある24感情の色 */
+  midColor: string;
+}
+
+export function createTelescopeRegionIndicatorState(): TelescopeRegionIndicatorState {
+  return {
+    active: false,
+    angle: 0,
+    progress: 0.5,
+    reveal: 0,
+    startColor: '#ffffff',
+    endColor: '#ffffff',
+    midColor: '#ffffff',
+  };
+}
+
+/** レイヤー3で画面中央に捉えている区画（クリックでレイヤー4へ入る） */
+export interface TelescopeSegmentFocusState {
+  active: boolean;
+  segmentIndex: number | null;
+  plotIds: string[];
+  closeness: number;
+}
+
+export function createTelescopeSegmentFocusState(): TelescopeSegmentFocusState {
+  return {
+    active: false,
+    segmentIndex: null,
+    plotIds: [],
+    closeness: 0,
+  };
+}
+
+/**
+ * 画面固定 HUD の現在位置インジケータへ、バーの画面上の傾きと
+ * 視線中央がバーと交わる位置（現在位置）を毎フレーム報告する。
+ */
+function Layer3IndicatorReporter({
+  region,
+  reveal,
+  state,
+}: {
+  region: TelescopeRegionDefinition;
+  reveal: Layer3RevealRef;
+  state: { current: TelescopeRegionIndicatorState };
+}) {
+  const projStart = useMemo(() => new THREE.Vector3(), []);
+  const projEnd = useMemo(() => new THREE.Vector3(), []);
+  const viewDirection = useMemo(() => new THREE.Vector3(), []);
+
+  useEffect(() => {
+    const shared = state.current;
+    shared.active = true;
+    shared.startColor = region.start.color;
+    shared.endColor = region.end.color;
+    shared.midColor = blendHex(region.start.color, region.end.color, 0.5);
+    return () => {
+      shared.active = false;
+      shared.reveal = 0;
+    };
+  }, [state, region]);
+
+  useFrame(({ camera, size }) => {
+    // バーの両端を画面座標へ投影し、線の傾きをそろえる
+    projStart.set(...region.start.position).project(camera);
+    projEnd.set(...region.end.position).project(camera);
+    const dxPx = (projEnd.x - projStart.x) * size.width * 0.5;
+    const dyPx = -(projEnd.y - projStart.y) * size.height * 0.5;
+
+    // 画面中央の視線がバー平面（z=0）と交わる点 = 現在位置
+    camera.getWorldDirection(viewDirection);
+    let progress = state.current.progress;
+    if (Math.abs(viewDirection.z) > 1e-5) {
+      const k = -camera.position.z / viewDirection.z;
+      const hitX = camera.position.x + viewDirection.x * k;
+      const hitY = camera.position.y + viewDirection.y * k;
+      const along =
+        (hitX - region.start.position[0]) * region.direction[0] +
+        (hitY - region.start.position[1]) * region.direction[1];
+      progress = THREE.MathUtils.clamp(
+        along / TELESCOPE_REGION_VIEW.spanLength,
+        TELESCOPE_REGION_VIEW.progressMin,
+        TELESCOPE_REGION_VIEW.progressMax,
+      );
+    }
+
+    const shared = state.current;
+    shared.angle = Math.atan2(dyPx, dxPx);
+    shared.progress = progress;
+    shared.reveal = reveal.current;
+  });
+
+  return null;
+}
+
+function Layer3EmotionRegion({
+  selectedDyadId,
+  focusBasicId,
+  plots,
+  leaving,
+  indicator,
+  segmentFocus,
+  explorationPlotId,
+  onSelectExplorationPlot,
+}: {
+  selectedDyadId: EmotionId;
+  focusBasicId: BasicEmotionId | null;
+  plots: readonly UserPlotRow[];
+  /** レイヤー2へ戻る最中はフェードアウト方向に演出を巻き戻す */
+  leaving: boolean;
+  /** 画面固定 HUD の現在位置インジケータと共有する状態 */
+  indicator?: { current: TelescopeRegionIndicatorState };
+  /** 中央検知区画の共有状態（レイヤー4入口） */
+  segmentFocus?: { current: TelescopeSegmentFocusState };
+  /** レイヤー4で選択中の感情点。指定時は探索シーンを描画 */
+  explorationPlotId?: string | null;
+  onSelectExplorationPlot?: (id: string) => void;
+}) {
+  const region = useMemo(
+    () => getTelescopeRegionDefinition(selectedDyadId, focusBasicId),
+    [selectedDyadId, focusBasicId],
+  );
+  const reveal = useRef(0);
+  const lastAppliedReveal = useRef(-1);
+
+  // プライマリ感情で絞り込み、統一空間上で帯付近の点だけを残す。
+  // 選択中の24感情＋両端の2基本感情のみ（他の24感情の点は位置が重なっても出さない）。
+  const regionPlots = useMemo(() => {
+    if (!region) {
+      return [];
+    }
+    const allowedPrimary = new Set<string>([
+      selectedDyadId,
+      region.start.id,
+      region.end.id,
+    ]);
+    const [sx, sy] = region.start.position;
+    const [dirX, dirY] = region.direction;
+    const result: { row: UserPlotRow; color: string }[] = [];
+    plots.forEach((plot) => {
+      if (!allowedPrimary.has(plot.primaryId)) {
+        return;
+      }
+      const real = getTelescopePlotPosition(plot);
+      const [x, y] = telescopeRegionToUnifiedSpace(region, real[0], real[1]);
+      const relX = x - sx;
+      const relY = y - sy;
+      const along = relX * dirX + relY * dirY;
+      const perp = dirX * relY - dirY * relX;
+      if (
+        along < -LAYER3_REGION_LENGTH_PAD ||
+        along > TELESCOPE_REGION_VIEW.spanLength + LAYER3_REGION_LENGTH_PAD ||
+        Math.abs(perp) > TELESCOPE_REGION_VIEW.regionHalfWidth
+      ) {
+        return;
+      }
+      result.push({ row: plot, color: plotColorFromRow(plot) });
+    });
+    return result;
+  }, [plots, region, selectedDyadId]);
+
+  const startColor = region?.start.color ?? '#ffffff';
+  const endColor = region?.end.color ?? '#ffffff';
+  const stripLength = LAYER3_STRIP_LENGTH;
+  const width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2;
+
+  // 両端を丸めたスタジアム形状＋ start → end のグラデーション。
+  // 頂点カラーは RGBA で持ち、A を入場演出のスイープに使う。
+  const stripGeometry = useMemo(() => {
+    const halfL = stripLength / 2;
+    const halfW = width / 2;
+    const radius = halfW;
+    const shape = new THREE.Shape();
+    shape.moveTo(-halfL + radius, -halfW);
+    shape.lineTo(halfL - radius, -halfW);
+    shape.absarc(halfL - radius, 0, radius, -Math.PI / 2, Math.PI / 2, false);
+    shape.lineTo(-halfL + radius, halfW);
+    shape.absarc(-halfL + radius, 0, radius, Math.PI / 2, (3 * Math.PI) / 2, false);
+
+    const geometry = new THREE.ShapeGeometry(shape, 24);
+    const positionAttribute = geometry.attributes.position;
+    const colors = new Float32Array(positionAttribute.count * 4);
+    const colorStart = new THREE.Color(startColor);
+    const colorEnd = new THREE.Color(endColor);
+    const mixed = new THREE.Color();
+    for (let index = 0; index < positionAttribute.count; index++) {
+      const t = THREE.MathUtils.clamp(
+        positionAttribute.getX(index) / stripLength + 0.5,
+        0,
+        1,
+      );
+      mixed.copy(colorStart).lerp(colorEnd, t);
+      colors[index * 4] = mixed.r;
+      colors[index * 4 + 1] = mixed.g;
+      colors[index * 4 + 2] = mixed.b;
+      colors[index * 4 + 3] = 0;
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4));
+    return geometry;
+  }, [stripLength, width, startColor, endColor]);
+
+  useEffect(() => () => stripGeometry.dispose(), [stripGeometry]);
+
+  useFrame((_, delta) => {
+    // 入場は end（手前）側から掃くように、退場は素早く全体を巻き戻す
+    const step = delta / LAYER3_REVEAL_DURATION_S;
+    const next = THREE.MathUtils.clamp(
+      reveal.current + (leaving ? -step * 2.5 : step),
+      0,
+      1,
+    );
+    reveal.current = next;
+    if (Math.abs(next - lastAppliedReveal.current) < 0.0005) {
+      return;
+    }
+    lastAppliedReveal.current = next;
+    const colorAttribute = stripGeometry.getAttribute(
+      'color',
+    ) as THREE.BufferAttribute;
+    const positionAttribute = stripGeometry.getAttribute('position');
+    for (let index = 0; index < positionAttribute.count; index++) {
+      const t = THREE.MathUtils.clamp(
+        positionAttribute.getX(index) / stripLength + 0.5,
+        0,
+        1,
+      );
+      colorAttribute.setW(index, layer3RevealFactor(next, t));
+    }
+    colorAttribute.needsUpdate = true;
+  });
+
+  if (!region) {
+    return null;
+  }
+
+  const dx = region.end.position[0] - region.start.position[0];
+  const dy = region.end.position[1] - region.start.position[1];
+  const rotation = Math.atan2(dy, dx);
+
+  return (
+    <group>
+      <group
+        position={[region.midpoint[0], region.midpoint[1], -0.08]}
+        rotation={[0, 0, rotation]}
+      >
+        <mesh geometry={stripGeometry}>
+          <meshBasicMaterial
+            vertexColors
+            transparent
+            opacity={0.2}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+            toneMapped={false}
+          />
+        </mesh>
+        <Layer3BarSegments
+          region={region}
+          plots={regionPlots}
+          width={width}
+          startColor={startColor}
+          endColor={endColor}
+          reveal={reveal}
+          segmentFocus={explorationPlotId ? undefined : segmentFocus}
+        />
+      </group>
+
+      {!explorationPlotId
+        ? [region.start, region.end].map((node) => (
+            <Layer2EmotionLabel
+              key={node.id}
+              node={node}
+              color={node.color}
+              trackRadius={0.16}
+              fontSize={0.07}
+              reveal={reveal}
+              revealAlongT={layer3AlongT(
+                region,
+                node.position[0],
+                node.position[1],
+              )}
+            />
+          ))
+        : null}
+
+      {!explorationPlotId ? (
+        <Layer2EmotionLabel
+          node={{
+            id: region.id,
+            label: region.label,
+            color: blendHex(startColor, endColor, 0.5),
+            position: region.midpoint,
+            kind: 'dyad',
+          }}
+          color={blendHex(startColor, endColor, 0.5)}
+          trackRadius={0.16}
+          fontSize={0.07}
+          reveal={reveal}
+          revealAlongT={0.5}
+        />
+      ) : null}
+
+      {explorationPlotId && onSelectExplorationPlot ? (
+        <Layer4ExplorationLayer
+          region={region}
+          plots={regionPlots.map((plot) => plot.row)}
+          selectedPlotId={explorationPlotId}
+          onSelectPlot={onSelectExplorationPlot}
+        />
+      ) : (
+        <Layer3RegionPlots plots={regionPlots} region={region} reveal={reveal} />
+      )}
+      {indicator && !explorationPlotId ? (
+        <Layer3IndicatorReporter
+          region={region}
+          reveal={reveal}
+          state={indicator}
+        />
+      ) : null}
+    </group>
+  );
+}
+
 interface TelescopeGalaxyLayerProps {
   zoomPhase: TelescopeZoomPhase;
   detailVisibility: number;
@@ -980,8 +2086,16 @@ interface TelescopeGalaxyLayerProps {
   layer2SceneActive?: boolean;
   /** 3段階目の中心感情（ロック）— 配置は変えず、強調と検知対象に使う */
   focusBasicId: BasicEmotionId | null;
+  selectedDyadId: EmotionId | null;
   wordPlots: readonly UserPlotRow[];
   onViewFocus?: (focus: TelescopeViewFocus) => void;
+  /** レイヤー3の現在位置インジケータ（画面固定 HUD）との共有状態 */
+  regionIndicator?: { current: TelescopeRegionIndicatorState };
+  /** レイヤー3の中央検知区画（レイヤー4入口） */
+  segmentFocus?: { current: TelescopeSegmentFocusState };
+  /** レイヤー4で選択中の感情点 */
+  explorationPlotId?: string | null;
+  onSelectExplorationPlot?: (id: string) => void;
 }
 
 export function TelescopeGalaxyLayer({
@@ -989,8 +2103,13 @@ export function TelescopeGalaxyLayer({
   detailVisibility,
   layer2SceneActive = false,
   focusBasicId,
+  selectedDyadId,
   wordPlots,
   onViewFocus,
+  regionIndicator,
+  segmentFocus,
+  explorationPlotId = null,
+  onSelectExplorationPlot,
 }: TelescopeGalaxyLayerProps) {
   const detailColors = useDetailColors();
   const projected = useRef(new THREE.Vector3());
@@ -1006,6 +2125,18 @@ export function TelescopeGalaxyLayer({
     [focusBasicId],
   );
 
+  const inExplorationView =
+    Boolean(selectedDyadId) &&
+    Boolean(explorationPlotId) &&
+    (zoomPhase === 'entering-exploration' ||
+      zoomPhase === 'exploration' ||
+      zoomPhase === 'leaving-exploration');
+  const inRegionView =
+    Boolean(selectedDyadId) &&
+    (zoomPhase === 'entering-region' ||
+      zoomPhase === 'region' ||
+      zoomPhase === 'leaving-region' ||
+      inExplorationView);
   const inFocusView =
     Boolean(focusBasicId) &&
     layer2SceneActive &&
@@ -1023,6 +2154,12 @@ export function TelescopeGalaxyLayer({
       zoomPhase === 'wide' ||
       zoomPhase === 'zooming-in' ||
       zoomPhase === 'detail' ||
+      zoomPhase === 'entering-region' ||
+      zoomPhase === 'region' ||
+      zoomPhase === 'leaving-region' ||
+      zoomPhase === 'entering-exploration' ||
+      zoomPhase === 'exploration' ||
+      zoomPhase === 'leaving-exploration' ||
       zoomPhase === 'zooming-out';
 
     if (!inView) {
@@ -1104,7 +2241,22 @@ export function TelescopeGalaxyLayer({
     }
 
     let nearest: TelescopeNearestEmotion | null = null;
-    if (inFocusView && focusBasicId) {
+    if (inRegionView && selectedDyadId) {
+      const emotion = getEmotionById(selectedDyadId);
+      const node = TELESCOPE_DETAIL_NODES.find(
+        (candidate) => candidate.id === selectedDyadId,
+      );
+      if (node) {
+        nearest = {
+          id: selectedDyadId,
+          label: emotion.label,
+          color: detailColors.get(selectedDyadId) ?? node.color,
+          angle: 0,
+          nx: 0,
+          ny: 0,
+        };
+      }
+    } else if (inFocusView && focusBasicId) {
       // Layer2: 画面中央のバー選択と検知ラベルを一致させる
       const partnerId = focusedBarPartnerRef.current;
       if (partnerId) {
@@ -1143,10 +2295,11 @@ export function TelescopeGalaxyLayer({
     }
 
     const nearestId = nearest?.id ?? null;
-    const directionCandidates = [
-      ...insideHits.slice(nearest ? 1 : 0),
-      ...outsideHits,
-    ].sort((a, b) => a.dist - b.dist);
+    const directionCandidates = (
+      inRegionView
+        ? []
+        : [...insideHits.slice(nearest ? 1 : 0), ...outsideHits]
+    ).sort((a, b) => a.dist - b.dist);
     const filteredCandidates = directionCandidates.filter((hit) => {
       if (hit.id === nearestId) {
         return false;
@@ -1199,6 +2352,24 @@ export function TelescopeGalaxyLayer({
 
   return (
     <group>
+      {inRegionView && selectedDyadId ? (
+        <Layer3EmotionRegion
+          selectedDyadId={selectedDyadId}
+          focusBasicId={focusBasicId}
+          plots={wordPlots}
+          leaving={zoomPhase === 'leaving-region'}
+          indicator={regionIndicator}
+          segmentFocus={segmentFocus}
+          explorationPlotId={
+            inExplorationView || zoomPhase === 'leaving-exploration'
+              ? explorationPlotId
+              : null
+          }
+          onSelectExplorationPlot={onSelectExplorationPlot}
+        />
+      ) : null}
+      {!inRegionView ? (
+        <>
       <BasicEmotionOrbits
         visible={
           zoomPhase === 'approaching' ||
@@ -1286,6 +2457,8 @@ export function TelescopeGalaxyLayer({
             );
           })
         : null}
+        </>
+      ) : null}
     </group>
   );
 }

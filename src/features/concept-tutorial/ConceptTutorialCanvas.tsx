@@ -1,8 +1,8 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { getHomeTutorialCameraPose } from '../home-tutorial/camera';
-import { OrbitingStepLabel, StepGuideParticles } from '../home-tutorial/HomeTutorialStepGuides';
+import { getConceptTutorialCameraPose } from './camera';
+import { OrbitingStepLabel, StepGuideParticles } from './ConceptStepGuides';
 import { CONCEPT_TUTORIAL_STEPS } from './constants';
 
 const CAMERA_FOV = 55;
@@ -28,7 +28,7 @@ function ConceptTutorialCamera({ activeStepIndex }: { activeStepIndex: number })
     camera.updateProjectionMatrix();
 
     const step = CONCEPT_TUTORIAL_STEPS[activeStepIndex] ?? CONCEPT_TUTORIAL_STEPS[0];
-    const pose = getHomeTutorialCameraPose(step, size.width);
+    const pose = getConceptTutorialCameraPose(step, size.width);
     smoothLookAt.current.copy(pose.lookAt);
     smoothCameraPos.current.copy(pose.position);
     targetLookAt.current.copy(pose.lookAt);
@@ -39,7 +39,7 @@ function ConceptTutorialCamera({ activeStepIndex }: { activeStepIndex: number })
 
   useEffect(() => {
     const step = CONCEPT_TUTORIAL_STEPS[activeStepIndex] ?? CONCEPT_TUTORIAL_STEPS[0];
-    const pose = getHomeTutorialCameraPose(step, size.width);
+    const pose = getConceptTutorialCameraPose(step, size.width);
     targetLookAt.current.copy(pose.lookAt);
     targetCameraPos.current.copy(pose.position);
   }, [activeStepIndex, size.width]);
@@ -129,7 +129,7 @@ export function ConceptTutorialCanvas({
   onStepSelect?: (index: number) => void;
 }) {
   const initialViewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
-  const initialPose = useMemo(() => getHomeTutorialCameraPose(CONCEPT_TUTORIAL_STEPS[0], initialViewportWidth), []);
+  const initialPose = useMemo(() => getConceptTutorialCameraPose(CONCEPT_TUTORIAL_STEPS[0], initialViewportWidth), []);
   const activeStep = CONCEPT_TUTORIAL_STEPS[activeStepIndex] ?? CONCEPT_TUTORIAL_STEPS[0];
   const nextStep = CONCEPT_TUTORIAL_STEPS[activeStepIndex + 1];
   const previousStep = CONCEPT_TUTORIAL_STEPS[activeStepIndex - 1];

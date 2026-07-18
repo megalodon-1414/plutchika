@@ -67,8 +67,8 @@ export const TELESCOPE_BASIC_SPHERE_RADIUS = 0.22;
 export const TELESCOPE_DYAD_SPHERE_RADIUS = 0.11;
 
 /**
- * far → wide → detail の3階層。
- * approaching / zooming-* は演出中。
+ * far → wide → detail → region → exploration の5階層。
+ * approaching / zooming-* / entering-* / leaving-* は演出中。
  */
 export type TelescopeZoomPhase =
   | 'far'
@@ -76,10 +76,21 @@ export type TelescopeZoomPhase =
   | 'wide'
   | 'zooming-in'
   | 'detail'
+  | 'entering-region'
+  | 'region'
+  | 'leaving-region'
+  | 'entering-exploration'
+  | 'exploration'
+  | 'leaving-exploration'
   | 'zooming-out'
   | 'retreating';
 
-export type TelescopeSettledPhase = 'far' | 'wide' | 'detail';
+export type TelescopeSettledPhase =
+  | 'far'
+  | 'wide'
+  | 'detail'
+  | 'region'
+  | 'exploration';
 
 export interface TelescopeNodePosition {
   id: string;
@@ -119,6 +130,8 @@ export function distanceForPhase(phase: TelescopeSettledPhase): number {
     case 'wide':
       return TELESCOPE_CAMERA_DISTANCE_WIDE;
     case 'detail':
+    case 'region':
+    case 'exploration':
       return TELESCOPE_CAMERA_DISTANCE_ZOOM;
   }
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
-import { getBasicEmotion } from '../../data/emotions';
+import { getBasicEmotion, getEmotionById } from '../../data/emotions';
 import { EmotionMinimap } from '../../components/EmotionMinimap';
 import { ROUTES } from '../../routes/paths';
 import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
@@ -17,12 +17,17 @@ import type { TelescopeSettledPhase, TelescopeZoomPhase } from './constants';
 import { TelescopeEyepiece } from './TelescopeEyepiece';
 import {
   TelescopeInnerTrackLabel,
+  TelescopeRegionPositionHud,
   TelescopeRimEmotionIcons,
 } from './TelescopeEyepieceHud';
 import {
+  createTelescopeRegionIndicatorState,
+  createTelescopeSegmentFocusState,
   resolveFocusBasicId,
   type TelescopeViewFocus,
 } from './TelescopeGalaxyLayer';
+import { pickRandomPlotIdInSegment } from './layer3Segments';
+import { plotColorFromRow } from '../../utils/plotFromUserPlot';
 import { TelescopeSpaceCanvas } from './TelescopeSpaceCanvas';
 import { TelescopeZoomLadder, zoomLevelIndex } from './TelescopeZoomLadder';
 
@@ -30,12 +35,30 @@ function isBusyPhase(phase: TelescopeZoomPhase): boolean {
   return (
     phase === 'approaching' ||
     phase === 'zooming-in' ||
+    phase === 'entering-region' ||
+    phase === 'leaving-region' ||
+    phase === 'entering-exploration' ||
+    phase === 'leaving-exploration' ||
     phase === 'zooming-out' ||
     phase === 'retreating'
   );
 }
 
 function settledFromPhase(phase: TelescopeZoomPhase): TelescopeSettledPhase {
+  if (
+    phase === 'exploration' ||
+    phase === 'entering-exploration' ||
+    phase === 'leaving-exploration'
+  ) {
+    return 'exploration';
+  }
+  if (
+    phase === 'region' ||
+    phase === 'entering-region' ||
+    phase === 'leaving-region'
+  ) {
+    return 'region';
+  }
   if (phase === 'detail' || phase === 'zooming-in') {
     return 'detail';
   }
@@ -56,6 +79,12 @@ function apertureForPhase(phase: TelescopeZoomPhase): number {
       return 0.7;
     case 'zooming-in':
     case 'detail':
+    case 'entering-region':
+    case 'region':
+    case 'leaving-region':
+    case 'entering-exploration':
+    case 'exploration':
+    case 'leaving-exploration':
       // TelescopeEyepiece の sizeScale = 0.9 + aperture * 0.1 により1.2倍。
       return 3;
     case 'retreating':
@@ -71,6 +100,10 @@ function layerLabel(settled: TelescopeSettledPhase): string {
       return 'LAYER 01 · 銀河 8+24';
     case 'detail':
       return 'LAYER 02 · 感情語プロット';
+    case 'region':
+      return 'LAYER 03 · 感情領域';
+    case 'exploration':
+      return 'LAYER 04 · 感情点探索';
   }
 }
 
@@ -94,11 +127,17 @@ export function TelescopeSpaceView() {
   const [zoomPhase, setZoomPhase] = useState<TelescopeZoomPhase>('far');
   const [viewFocus, setViewFocus] = useState<TelescopeViewFocus>(EMPTY_FOCUS);
   const [focusBasicId, setFocusBasicId] = useState<BasicEmotionId | null>(null);
+  const [selectedDyadId, setSelectedDyadId] = useState<EmotionId | null>(null);
+  const [explorationPlotId, setExplorationPlotId] = useState<string | null>(
+    null,
+  );
   const [minimapSync, setMinimapSync] = useState<MinimapSyncState | null>(null);
   const [wordPlots, setWordPlots] = useState<UserPlotRow[]>([]);
   const [infoUiScale, setInfoUiScale] = useState(getInfoUiScale);
   const [layer2HudActive, setLayer2HudActive] = useState(false);
   const retreatTargetRef = useRef<TelescopeSettledPhase | null>(null);
+  const regionIndicatorRef = useRef(createTelescopeRegionIndicatorState());
+  const segmentFocusRef = useRef(createTelescopeSegmentFocusState());
 
   useEffect(() => {
     let frame = 0;
@@ -151,7 +190,11 @@ export function TelescopeSpaceView() {
   }, [minimapAccentId]);
 
   const startZoomOutStep = useCallback((from: TelescopeSettledPhase) => {
-    if (from === 'detail') {
+    if (from === 'exploration') {
+      setZoomPhase('leaving-exploration');
+    } else if (from === 'region') {
+      setZoomPhase('leaving-region');
+    } else if (from === 'detail') {
       setZoomPhase('zooming-out');
     } else if (from === 'wide') {
       setZoomPhase('retreating');
@@ -176,6 +219,33 @@ export function TelescopeSpaceView() {
         setFocusBasicId(locked);
         return 'zooming-in';
       }
+      if (prev === 'detail') {
+        const nearestId = viewFocus.nearest?.id as EmotionId | undefined;
+        if (!nearestId?.startsWith('dyad-')) {
+          return prev;
+        }
+        setSelectedDyadId(nearestId);
+        setLayer2HudActive(false);
+        return 'entering-region';
+      }
+      if (prev === 'region') {
+        const focus = segmentFocusRef.current;
+        if (
+          !focus.active ||
+          focus.segmentIndex == null ||
+          focus.plotIds.length === 0 ||
+          focus.closeness < 0.05
+        ) {
+          return prev;
+        }
+        const startId = pickRandomPlotIdInSegment(focus.plotIds);
+        if (!startId) {
+          return prev;
+        }
+        setExplorationPlotId(startId);
+        setLayer2HudActive(false);
+        return 'entering-exploration';
+      }
       return prev;
     });
   }, [busy, viewFocus.nearest?.id]);
@@ -190,7 +260,11 @@ export function TelescopeSpaceView() {
         return;
       }
       retreatTargetRef.current = level;
-      if (current === 'detail') {
+      if (
+        current === 'detail' ||
+        current === 'region' ||
+        current === 'exploration'
+      ) {
         setLayer2HudActive(false);
       }
       startZoomOutStep(current);
@@ -205,6 +279,14 @@ export function TelescopeSpaceView() {
         setFocusBasicId(null);
         setLayer2HudActive(false);
       }
+      if (phase === 'detail') {
+        setSelectedDyadId(null);
+        setExplorationPlotId(null);
+        setLayer2HudActive(true);
+      }
+      if (phase === 'region') {
+        setExplorationPlotId(null);
+      }
       const target = retreatTargetRef.current;
       if (target && zoomLevelIndex(phase) > zoomLevelIndex(target)) {
         startZoomOutStep(phase);
@@ -215,6 +297,10 @@ export function TelescopeSpaceView() {
     [startZoomOutStep],
   );
 
+  const handleSelectExplorationPlot = useCallback((id: string) => {
+    setExplorationPlotId(id);
+  }, []);
+
   const handleViewFocus = useCallback((focus: TelescopeViewFocus) => {
     setViewFocus(focus);
   }, []);
@@ -224,6 +310,8 @@ export function TelescopeSpaceView() {
   }, []);
 
   const detailHudMode = settled === 'detail' && layer2HudActive;
+  const regionHudMode = settled === 'region';
+  const explorationHudMode = settled === 'exploration';
   const selectedEmotion = useMemo(() => {
     if (!focusBasicId) {
       return null;
@@ -231,6 +319,25 @@ export function TelescopeSpaceView() {
     const emotion = getBasicEmotion(focusBasicId);
     return { label: emotion.label, color: emotion.color };
   }, [focusBasicId]);
+  const selectedDyad = useMemo(() => {
+    if (!selectedDyadId) {
+      return null;
+    }
+    const emotion = getEmotionById(selectedDyadId);
+    return 'components' in emotion
+      ? { label: emotion.label, color: getPrimaryEmotionColor(selectedDyadId) }
+      : null;
+  }, [selectedDyadId]);
+  const selectedExploration = useMemo(() => {
+    if (!explorationPlotId) {
+      return null;
+    }
+    const plot = wordPlots.find((row) => row.word_id === explorationPlotId);
+    if (!plot) {
+      return null;
+    }
+    return { label: plot.word_id, color: plotColorFromRow(plot) };
+  }, [explorationPlotId, wordPlots]);
 
   return (
     <div
@@ -269,6 +376,7 @@ export function TelescopeSpaceView() {
               focus={viewFocus}
               visible={showHud}
               detailMode={detailHudMode}
+              regionMode={regionHudMode || explorationHudMode}
               selectedEmotion={selectedEmotion}
             />
             {detailHudMode ? (
@@ -277,6 +385,20 @@ export function TelescopeSpaceView() {
                 visible={showRimGlow}
                 detailMode
               />
+            ) : null}
+            {/* レイヤー3 現在位置インジケータ — 接眼円の内側左下に固定 */}
+            {regionHudMode ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '25%',
+                  bottom: '30%',
+                  transform: 'translate(-50%, 50%)',
+                  pointerEvents: 'none',
+                }}
+              >
+                <TelescopeRegionPositionHud state={regionIndicatorRef} />
+              </div>
             ) : null}
           </>
         }
@@ -293,6 +415,7 @@ export function TelescopeSpaceView() {
         <TelescopeSpaceCanvas
           zoomPhase={zoomPhase}
           focusBasicId={focusBasicId}
+          selectedDyadId={selectedDyadId}
           wordPlots={wordPlots}
           viewFocus={viewFocus}
           onZoomComplete={handleZoomComplete}
@@ -300,6 +423,10 @@ export function TelescopeSpaceView() {
           onLayer2RotationComplete={() => setLayer2HudActive(true)}
           onViewFocus={handleViewFocus}
           onMinimapSync={handleMinimapSync}
+          regionIndicator={regionIndicatorRef}
+          segmentFocus={segmentFocusRef}
+          explorationPlotId={explorationPlotId}
+          onSelectExplorationPlot={handleSelectExplorationPlot}
         />
       </TelescopeEyepiece>
 
@@ -326,6 +453,8 @@ export function TelescopeSpaceView() {
           busy={busy}
           onRetreatTo={handleRetreatTo}
           selectedEmotion={selectedEmotion}
+          selectedDetailEmotion={selectedDyad}
+          selectedExplorationEmotion={selectedExploration}
         />
       </div>
 
@@ -409,8 +538,16 @@ export function TelescopeSpaceView() {
           }}
         >
           {busy ? '調整中…' : layer}
-          {!busy && settled !== 'detail' ? '  ·  円内クリックで近づく / 右の点で戻る' : null}
+          {!busy && (settled === 'far' || settled === 'wide')
+            ? '  ·  円内クリックで近づく / 右の点で戻る'
+            : null}
           {!busy && settled === 'detail' ? '  ·  右の点で戻る / ドラッグで見回す' : null}
+          {!busy && settled === 'region'
+            ? '  ·  ハイライト区画をクリックで探索へ / ドラッグで移動 / 右の点で戻る'
+            : null}
+          {!busy && settled === 'exploration'
+            ? '  ·  近い感情点をクリックして移動 / 右の点で戻る'
+            : null}
         </p>
       </div>
     </div>

@@ -3,16 +3,18 @@
 周辺ページ（ホーム・解説など）はこの `pages/` 以下に追加してください。  
 感情MAP本体は **`EmotionMapPage.tsx` のみ** — `components/` や MAP 用 `utils/` への変更は共同開発の衝突を避けるため最小限に。
 
-ホームの 3D チュートリアルは **`features/home-tutorial/`** にまとめる（感情MAPと分離）。  
+ホームは **`features/home-intro/`**（惑星ウォーク導入）。  
+コンセプト解説は **`features/concept-tutorial/`**。  
 望遠鏡実験空間は **`features/telescope-space/`**（既存 MAP を壊さない並行実装）。
 
 ## ルート
 
 | パス | ファイル | 内容 |
 |------|----------|------|
-| `/` | `HomePage.tsx` | 3Dチュートリアルホーム（PLUTCHIKA） |
+| `/` | `HomePage.tsx` | ホーム導入（PLUTCHIKA） |
 | `/map` | `EmotionMapPage.tsx` | 感情MAP（3D 探索） |
 | `/telescope` | `TelescopeSpacePage.tsx` | 望遠鏡モチーフ感情空間（実験） |
+| `/concept` | `ConceptTutorialPage.tsx` | コンセプト解説チュートリアル |
 
 ルート定数は `src/routes/paths.ts` に集約。
 
