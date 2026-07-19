@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
 import type { UserPlotRow } from '../types/userPlot';
 import { EMOTION_INTENSITY_MAX } from '../utils/emotionPlotBridge';
-import { resolvePrimaryEmotionLabel } from '../utils/emotionCoordinates';
 import { getExplorationInfoUiLayout } from '../utils/explorationInfoUiLayout';
 import { getPrimaryEmotionColor } from '../utils/emotionPlotBridge';
 import { getEmotionUiTheme } from '../utils/emotionUiTheme';
-import { getPlotKindLabel } from '../utils/plotTags';
 
 interface ExplorationWordInfoPanelProps {
   plot: UserPlotRow;
   /** 右側に別HUDがある場合の退避量 */
   rightOffset?: number;
+  /** 引き出し線などの外部参照用 */
+  panelRef?: MutableRefObject<HTMLElement | null>;
 }
 
 function viewportSize() {
@@ -27,6 +27,7 @@ function viewportSize() {
 export function ExplorationWordInfoPanel({
   plot,
   rightOffset = 210,
+  panelRef,
 }: ExplorationWordInfoPanelProps) {
   const [viewport, setViewport] = useState(viewportSize);
 
@@ -53,20 +54,20 @@ export function ExplorationWordInfoPanel({
   );
   const meaning =
     plot.meaning?.trim() || 'この単語の意味データはまだ登録されていません。';
-  const primaryLabel = resolvePrimaryEmotionLabel(plot.primaryId, plot.primaryLabel);
-  const secondaryLabel = resolvePrimaryEmotionLabel(
-    plot.secondaryId,
-    plot.secondaryLabel,
-  );
 
   return (
     <aside
       key={plot.word_id}
+      ref={(el) => {
+        if (panelRef) {
+          panelRef.current = el;
+        }
+      }}
       aria-label={`${plot.word_id}の説明`}
       style={{
         position: 'absolute',
         top: '50%',
-        right: Math.max(rightOffset, Math.round(viewport.width * 0.13)),
+        right: Math.max(rightOffset, Math.round(viewport.width * 0.09)),
         width: 'max-content',
         maxWidth: `calc(100vw - ${rightOffset + 24}px)`,
         minHeight: layout.height,
@@ -256,30 +257,6 @@ export function ExplorationWordInfoPanel({
             </p>
           ) : null}
         </div>
-
-        <dl
-          style={{
-            writingMode: 'vertical-rl',
-            textOrientation: 'mixed',
-            display: 'grid',
-            gridAutoFlow: 'column',
-            gridTemplateRows: 'auto auto',
-            columnGap: layout.columnGap,
-            rowGap: layout.rowGap,
-            margin: 0,
-            padding: '2px 0',
-            fontSize: layout.dlFontSize,
-          }}
-        >
-          <dt style={{ color: theme.textMuted }}>主感情</dt>
-          <dd style={{ margin: 0, fontWeight: 700 }}>{primaryLabel}</dd>
-          <dt style={{ color: theme.textMuted }}>副感情</dt>
-          <dd style={{ margin: 0, fontWeight: 700 }}>{secondaryLabel}</dd>
-          <dt style={{ color: theme.textMuted }}>強度</dt>
-          <dd style={{ margin: 0, fontWeight: 700 }}>{plot.intensity}</dd>
-          <dt style={{ color: theme.textMuted }}>種別</dt>
-          <dd style={{ margin: 0, fontWeight: 700 }}>{getPlotKindLabel(plot)}</dd>
-        </dl>
 
         <div
           style={{

@@ -87,6 +87,7 @@ interface TelescopeSpaceCanvasProps {
 
 const PIVOT = new THREE.Vector3(...TELESCOPE_PIVOT);
 const LOOK_AHEAD = new THREE.Vector3();
+const TMP_PLOT_PROJECT = new THREE.Vector3();
 const TMP_LOOK = new THREE.Vector3();
 const TMP_TANGENT = new THREE.Vector3();
 const TMP_UP = new THREE.Vector3();
@@ -1035,7 +1036,7 @@ function TelescopeCameraController({
     };
   }, [gl]);
 
-  useFrame((_state, delta) => {
+  useFrame((state, delta) => {
     if (!(camera instanceof THREE.PerspectiveCamera)) {
       return;
     }
@@ -1304,7 +1305,30 @@ function TelescopeCameraController({
         currentLookAt.current.copy(TMP_LOOK);
       }
       if (explorationHud) {
-        explorationHud.current.yaw = explorationYaw.current;
+        const hud = explorationHud.current;
+        hud.yaw = explorationYaw.current;
+        // 選択中プロット点の画面位置（説明UIへの引き出し線用）
+        const plotId = explorationPlotIdRef.current;
+        const plot = plotId
+          ? wordPlotsRef.current.find((row) => row.word_id === plotId)
+          : null;
+        if (plot) {
+          const [px, py] = getTelescopeRegionPlotPosition(
+            region,
+            plot,
+            state.clock.elapsedTime,
+          );
+          TMP_PLOT_PROJECT.set(px, py, 0.04).project(camera);
+          const rect = gl.domElement.getBoundingClientRect();
+          hud.plotClientX =
+            rect.left + (TMP_PLOT_PROJECT.x * 0.5 + 0.5) * rect.width;
+          hud.plotClientY =
+            rect.top + (0.5 - TMP_PLOT_PROJECT.y * 0.5) * rect.height;
+          hud.plotVisible =
+            TMP_PLOT_PROJECT.z >= -1 && TMP_PLOT_PROJECT.z <= 1;
+        } else {
+          hud.plotVisible = false;
+        }
       }
       reportMinimapCamera(camera);
       return;

@@ -16,6 +16,17 @@ export const TELESCOPE_AIM = {
 
 const pointerNdc = { x: 0, y: 0, valid: false };
 
+let pinHidden = false;
+
+/** 照準ピンの一時非表示（矢印ホバー中など、別UIが操作を受けている間） */
+export function setTelescopePinHidden(hidden: boolean): void {
+  pinHidden = hidden;
+}
+
+export function isTelescopePinHidden(): boolean {
+  return pinHidden;
+}
+
 /** 現在の照準 NDC（center モード時は常に (0,0)） */
 export function getTelescopeAimNdc(): { x: number; y: number } {
   if (TELESCOPE_AIM.mode === 'center' || !pointerNdc.valid) {

@@ -19,8 +19,22 @@ interface TelescopeEyepieceProps {
    * （はみ出した円は上下で切れて見える）。
    */
   overscan?: number;
+  /**
+   * レンズ全体（視野＋内側HUD）の水平オフセット。CSS長（例 '-9vw'）。
+   * レイヤー4で右側の単語説明UIを見やすくするために使う。
+   */
+  shiftX?: string;
   /** 選択した感情色でレンズ外周を発光させる */
   rimGlowColor?: string | null;
+}
+
+/** 接眼レンズの直径（CSS 長）。レンズ外の HUD がレンズ座標を再現する際にも使う */
+export function telescopeEyepieceDiameter(
+  aperture: number,
+  overscan = 1,
+): string {
+  const sizeScale = 0.9 + aperture * 0.1;
+  return `calc(min(${TELESCOPE_EYEPIECE_MAX_PX * sizeScale}px, ${TELESCOPE_EYEPIECE_VH * sizeScale}vh, 96vw) * ${overscan})`;
 }
 
 /**
@@ -33,10 +47,10 @@ export function TelescopeEyepiece({
   rightRail,
   aperture,
   overscan = 1,
+  shiftX = '0px',
   rimGlowColor = null,
 }: TelescopeEyepieceProps) {
-  const sizeScale = 0.9 + aperture * 0.1;
-  const diameter = `calc(min(${TELESCOPE_EYEPIECE_MAX_PX * sizeScale}px, ${TELESCOPE_EYEPIECE_VH * sizeScale}vh, 96vw) * ${overscan})`;
+  const diameter = telescopeEyepieceDiameter(aperture, overscan);
 
   const shellStyle: CSSProperties = {
     position: 'absolute',
@@ -51,12 +65,13 @@ export function TelescopeEyepiece({
     position: 'absolute',
     left: '50%',
     top: '50%',
-    // 画面より大きい円でも上下左右へ均等にはみ出すよう明示的に中央固定する
-    transform: 'translate(-50%, -50%)',
+    // 画面より大きい円でも上下左右へ均等にはみ出すよう明示的に中央固定する。
+    // shiftX で視野ごと水平にずらせる（レイヤー4の説明UI退避用）。
+    transform: `translate(calc(-50% + ${shiftX}), -50%)`,
     borderRadius: '50%',
     pointerEvents: 'auto',
     transition:
-      'width 1.2s cubic-bezier(0.4, 0, 0.2, 1), height 1.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 480ms ease',
+      'width 1.2s cubic-bezier(0.4, 0, 0.2, 1), height 1.2s cubic-bezier(0.4, 0, 0.2, 1), transform 1.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 480ms ease',
     boxShadow: rimGlowColor
       ? `
         0 0 0 2px ${rimGlowColor}dd,

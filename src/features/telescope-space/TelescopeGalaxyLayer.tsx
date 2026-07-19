@@ -46,6 +46,7 @@ import {
   LAYER3_BAR_SEGMENT_GAP,
 } from './layer3Segments';
 import { Layer4ExplorationLayer } from './Layer4ExplorationLayer';
+import { isTelescopeExplorationSelectablePlot } from './layer4Exploration';
 import { TelescopeWordPlotLayer } from './TelescopeWordPlotLayer';
 import type {
   TelescopeNearestEmotion,
@@ -2129,22 +2130,17 @@ function Layer3EmotionRegion({
   const reveal = useRef(0);
   const lastAppliedReveal = useRef(-1);
 
-  // プライマリ感情で絞り込み、統一空間上で帯付近の点だけを残す。
-  // 選択中の24感情＋両端の2基本感情のみ（他の24感情の点は位置が重なっても出さない）。
+  // 空間の3感情ルールで絞り込み、統一空間上で帯付近の点だけを残す。
+  // （主・副が3感情内 / 主がその24感情 — 別方向8感情への副感情は除外）
   const regionPlots = useMemo(() => {
     if (!region) {
       return [];
     }
-    const allowedPrimary = new Set<string>([
-      selectedDyadId,
-      region.start.id,
-      region.end.id,
-    ]);
     const [sx, sy] = region.start.position;
     const [dirX, dirY] = region.direction;
     const result: { row: UserPlotRow; color: string }[] = [];
     plots.forEach((plot) => {
-      if (!allowedPrimary.has(plot.primaryId)) {
+      if (!isTelescopeExplorationSelectablePlot(region, plot)) {
         return;
       }
       const real = getTelescopePlotPosition(plot);
@@ -2163,7 +2159,7 @@ function Layer3EmotionRegion({
       result.push({ row: plot, color: plotColorFromRow(plot) });
     });
     return result;
-  }, [plots, region, selectedDyadId]);
+  }, [plots, region]);
 
   const startColor = region?.start.color ?? '#ffffff';
   const endColor = region?.end.color ?? '#ffffff';

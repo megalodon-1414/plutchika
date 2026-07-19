@@ -21,21 +21,49 @@ export const TELESCOPE_EXPLORATION_VIEW = {
   cameraYaw: 0.32,
   /** ドラッグによる注視点まわり回転の感度（rad/px） */
   rotateSensitivity: 0.0075,
-  /** 近傍としてクリック可能な半径（統一空間） */
-  nearbyRadius: 0.85,
+  /** 選択セグメント中心からクリック可能とみなす半径（統一空間） */
+  nearbyRadius: 0.5,
   /** 近傍外の点の不透明度倍率 */
   distantOpacity: 0.28,
   distantScale: 0.42,
 } as const;
 
-/** レイヤー4 HUD（矢印）と共有するカメラ回転状態 */
+/** レイヤー4 HUD（矢印・引き出し線）と共有するカメラ・選択点状態 */
 export interface TelescopeExplorationHudState {
   /** 注視点まわりの現在の回転角（rad） */
   yaw: number;
+  /** 選択中プロット点の画面位置（クライアント座標 px） */
+  plotClientX: number;
+  plotClientY: number;
+  /** 選択点が画面内に投影されているか */
+  plotVisible: boolean;
 }
 
 export function createTelescopeExplorationHudState(): TelescopeExplorationHudState {
-  return { yaw: 0 };
+  return { yaw: 0, plotClientX: 0, plotClientY: 0, plotVisible: false };
+}
+
+/**
+ * レイヤー4で選択可能なプロットか。
+ * 空間の3感情（基本8×2＋24感情1）について:
+ * ① 主感情・副感情がともにその3感情のいずれか
+ * ② 主感情がその24感情である点はすべて可
+ *
+ * 別方向の8感情を副感情に持つ点などは除外し、遠くの点の誤検知を防ぐ。
+ */
+export function isTelescopeExplorationSelectablePlot(
+  region: TelescopeRegionDefinition,
+  plot: UserPlotRow,
+): boolean {
+  if (plot.primaryId === region.id) {
+    return true;
+  }
+  const spaceIds = new Set<string>([
+    region.id,
+    region.start.id,
+    region.end.id,
+  ]);
+  return spaceIds.has(plot.primaryId) && spaceIds.has(plot.secondaryId);
 }
 
 /** 統一空間上のプロット座標 */
@@ -65,6 +93,9 @@ export function getTelescopeExplorationNearbyIds(
   const nearby = new Set<string>([selectedId]);
   for (const plot of plots) {
     if (plot.word_id === selectedId) {
+      continue;
+    }
+    if (!isTelescopeExplorationSelectablePlot(region, plot)) {
       continue;
     }
     const [x, y] = getTelescopeRegionPlotPosition(region, plot, time);

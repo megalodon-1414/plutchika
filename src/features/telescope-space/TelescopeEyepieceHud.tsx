@@ -4,6 +4,7 @@ import type { TelescopeRegionIndicatorState } from './TelescopeGalaxyLayer';
 import {
   getTelescopeAimCssFraction,
   isTelescopeCursorAimActive,
+  isTelescopePinHidden,
   TELESCOPE_AIM,
 } from './telescopeAim';
 import type {
@@ -52,22 +53,8 @@ export function TelescopeInnerTrackLabel({
   visible,
   detailMode = false,
   regionMode = false,
-  selectedEmotion = null,
 }: TelescopeEyepieceHudProps) {
   const emotion = focus.nearest;
-  const [detectionShown, setDetectionShown] = useState(false);
-
-  useEffect(() => {
-    if (!visible || !emotion) {
-      setDetectionShown(false);
-      return;
-    }
-    setDetectionShown(false);
-    const enterFrame = requestAnimationFrame(() => {
-      setDetectionShown(true);
-    });
-    return () => cancelAnimationFrame(enterFrame);
-  }, [emotion?.id, visible]);
 
   if (!visible) {
     return null;
@@ -106,14 +93,6 @@ export function TelescopeInnerTrackLabel({
     return { ...source, active: index < rawColorSources.length };
   });
 
-  const primaryLabel =
-    detailMode && selectedEmotion ? selectedEmotion.label : emotion?.label ?? '';
-  const primaryColor =
-    detailMode && selectedEmotion
-      ? selectedEmotion.color
-      : emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
-  const detectionLabel = detailMode ? emotion?.label ?? '' : '';
-  const detectionColor = emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
   const aimAnchorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -129,6 +108,8 @@ export function TelescopeInnerTrackLabel({
           el.style.left = '50%';
           el.style.top = '50%';
         }
+        // 矢印ホバー中などはピンを一時的に隠す
+        el.style.visibility = isTelescopePinHidden() ? 'hidden' : 'visible';
       }
       frame = requestAnimationFrame(tick);
     };
@@ -313,58 +294,123 @@ export function TelescopeInnerTrackLabel({
         />
       </svg>
       </div>
+    </div>
+  );
+}
 
-      <div
-        aria-live="polite"
+/**
+ * 画面上部のガイドラベル（「今の気持ちは〜の方向／の中でも」）。
+ * レンズ径・オーバースキャン・水平シフトの影響を受けないよう、
+ * レンズ内ではなく画面座標に固定して表示する。
+ * レイヤー3では「の方向」を出さず、区画に応じた文言を可変部に表示する。
+ */
+export function TelescopeGuideLabelHud({
+  focus,
+  visible,
+  detailMode = false,
+  regionMode = false,
+  selectedEmotion = null,
+  regionGuideLabel = null,
+  regionGuideColor = null,
+}: Omit<TelescopeEyepieceHudProps, 'regionMode'> & {
+  regionMode?: boolean;
+  /** レイヤー3: 現在区画のガイド文言（例「悲観よりの悲しみ」） */
+  regionGuideLabel?: string | null;
+  regionGuideColor?: string | null;
+}) {
+  const emotion = focus.nearest;
+  const [detectionShown, setDetectionShown] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !emotion) {
+      setDetectionShown(false);
+      return;
+    }
+    setDetectionShown(false);
+    const enterFrame = requestAnimationFrame(() => {
+      setDetectionShown(true);
+    });
+    return () => cancelAnimationFrame(enterFrame);
+  }, [emotion?.id, visible]);
+
+  if (!visible) {
+    return null;
+  }
+
+  const primaryLabel = regionMode
+    ? regionGuideLabel ?? ''
+    : detailMode && selectedEmotion
+      ? selectedEmotion.label
+      : emotion?.label ?? '';
+  const primaryColor = regionMode
+    ? regionGuideColor ??
+      selectedEmotion?.color ??
+      'rgba(244, 236, 247, 0.55)'
+    : detailMode && selectedEmotion
+      ? selectedEmotion.color
+      : emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
+  const detectionLabel = detailMode ? emotion?.label ?? '' : '';
+  const detectionColor = emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
+  const primaryOpacity = regionMode
+    ? regionGuideLabel
+      ? 1
+      : 0.55
+    : detailMode
+      ? selectedEmotion
+        ? 1
+        : 0.55
+      : emotion && detectionShown
+        ? 1
+        : 0.55;
+
+  return (
+    <div
+      aria-live="polite"
+      style={{
+        position: 'absolute',
+        left: '50%',
+        top: 'clamp(72px, 13vh, 150px)',
+        transform: 'translateX(-50%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 8,
+        opacity: 0.92,
+        pointerEvents: 'none',
+        zIndex: 2,
+      }}
+    >
+      <span
         style={{
-          position: 'absolute',
-          left: '50%',
-          top: '6%',
-          transform: 'translateX(-50%)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 6,
-          opacity: 0.92,
-          pointerEvents: 'none',
+          color: 'rgba(244, 236, 247, 0.72)',
+          fontSize: '1.02rem',
+          fontWeight: 550,
+          letterSpacing: '0.18em',
+          whiteSpace: 'nowrap',
         }}
       >
-        <span
-          style={{
-            color: 'rgba(244, 236, 247, 0.72)',
-            fontSize: '0.78rem',
-            fontWeight: 550,
-            letterSpacing: '0.18em',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          今の気持ちは
-        </span>
-        <span
-          style={{
-            color: primaryColor,
-            fontSize: detailMode ? '1.08rem' : '1.45rem',
-            fontWeight: 750,
-            letterSpacing: '0.14em',
-            whiteSpace: 'nowrap',
-            minHeight: detailMode ? '1.2em' : '1.5em',
-            opacity: detailMode
-              ? selectedEmotion
-                ? 1
-                : 0.55
-              : emotion && detectionShown
-                ? 1
-                : 0.55,
-            transition: 'opacity 300ms ease, color 300ms ease',
-          }}
-        >
-          {primaryLabel || '\u00A0'}
-        </span>
+        今の気持ちは
+      </span>
+      <span
+        style={{
+          color: primaryColor,
+          fontSize: detailMode && !regionMode ? '1.4rem' : '1.9rem',
+          fontWeight: 750,
+          letterSpacing: '0.14em',
+          whiteSpace: 'nowrap',
+          minHeight: detailMode && !regionMode ? '1.2em' : '1.5em',
+          opacity: primaryOpacity,
+          transition: 'opacity 300ms ease, color 300ms ease',
+        }}
+      >
+        {primaryLabel || '\u00A0'}
+      </span>
+      {!regionMode ? (
         <span
           style={{
             marginTop: -2,
             color: 'rgba(244, 236, 247, 0.72)',
-            fontSize: '0.78rem',
+            fontSize: '1.02rem',
             fontWeight: 550,
             letterSpacing: '0.18em',
             whiteSpace: 'nowrap',
@@ -372,23 +418,23 @@ export function TelescopeInnerTrackLabel({
         >
           {detailMode ? 'の中でも' : 'の方向'}
         </span>
-        {detailMode ? (
-          <span
-            style={{
-              color: detectionColor,
-              fontSize: '1.45rem',
-              fontWeight: 750,
-              letterSpacing: '0.14em',
-              whiteSpace: 'nowrap',
-              minHeight: '1.5em',
-              opacity: emotion && detectionShown ? 1 : 0.55,
-              transition: 'opacity 300ms ease, color 300ms ease',
-            }}
-          >
-            {detectionLabel || '\u00A0'}
-          </span>
-        ) : null}
-      </div>
+      ) : null}
+      {detailMode && !regionMode ? (
+        <span
+          style={{
+            color: detectionColor,
+            fontSize: '1.9rem',
+            fontWeight: 750,
+            letterSpacing: '0.14em',
+            whiteSpace: 'nowrap',
+            minHeight: '1.5em',
+            opacity: emotion && detectionShown ? 1 : 0.55,
+            transition: 'opacity 300ms ease, color 300ms ease',
+          }}
+        >
+          {detectionLabel || '\u00A0'}
+        </span>
+      ) : null}
     </div>
   );
 }

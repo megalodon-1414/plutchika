@@ -3,11 +3,11 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { UserPlotRow } from '../../types/userPlot';
-import { isPurePlot } from '../../utils/emotionPlotBridge';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
-import { getLayer3SegmentIndexForPlot } from './layer3Segments';
+import { getLayer3SegmentWorldCenter } from './layer3Segments';
 import {
   getTelescopeRegionPlotPosition,
+  isTelescopeExplorationSelectablePlot,
   TELESCOPE_EXPLORATION_VIEW,
 } from './layer4Exploration';
 import type { TelescopeRegionDefinition } from './layer3Region';
@@ -15,28 +15,140 @@ import type { TelescopeRegionDefinition } from './layer3Region';
 const PLOT_RADIUS = 0.028;
 const WAVE_COUNT = 2;
 const WAVE_DURATION = 4.2;
+/** 画面上でこれより近い点のラベルを同じ衝突クラスタとして扱う */
+const LABEL_COLLISION_RADIUS_PX = 96;
+/** 点から引き出し線の始点までの隙間（px） */
+const LABEL_LEADER_GAP_PX = 10;
+/** 引き出し線の基本長（px） */
+const LABEL_LEADER_BASE_PX = 30;
+/** 衝突時に段違いにする1段あたりの追加長（px） */
+const LABEL_LEADER_STEP_PX = 56;
+
+type LabelLevelsRef = { current: Map<string, number> };
+
+/**
+ * 表示対象の点を画面座標へ投影して近接クラスタを作り、
+ * クラスタ内での引き出し線の段数（0,1,2…）を毎フレーム共有する。
+ * 選択中は常に段0（最短）で点のすぐ上に出す。
+ */
+function ExplorationLabelLevelCoordinator({
+  plots,
+  region,
+  segmentCenter,
+  selectedPlotId,
+  levels,
+}: {
+  plots: readonly UserPlotRow[];
+  region: TelescopeRegionDefinition;
+  segmentCenter: readonly [number, number];
+  selectedPlotId: string;
+  levels: LabelLevelsRef;
+}) {
+  const projected = useMemo(() => new THREE.Vector3(), []);
+
+  useFrame(({ camera, clock, size }) => {
+    const candidates: Array<{
+      id: string;
+      screenX: number;
+      screenY: number;
+    }> = [];
+    const time = clock.elapsedTime;
+
+    for (const plot of plots) {
+      const [x, y] = getTelescopeRegionPlotPosition(region, plot, time);
+      const isVisible =
+        plot.word_id === selectedPlotId ||
+        Math.hypot(x - segmentCenter[0], y - segmentCenter[1]) <=
+          TELESCOPE_EXPLORATION_VIEW.nearbyRadius;
+      if (!isVisible) {
+        continue;
+      }
+      projected.set(x, y, 0.04).project(camera);
+      candidates.push({
+        id: plot.word_id,
+        screenX: (projected.x * 0.5 + 0.5) * size.width,
+        screenY: (0.5 - projected.y * 0.5) * size.height,
+      });
+    }
+
+    const parent = candidates.map((_, index) => index);
+    const root = (index: number): number => {
+      let current = index;
+      while (parent[current] !== current) {
+        parent[current] = parent[parent[current]];
+        current = parent[current];
+      }
+      return current;
+    };
+    const join = (a: number, b: number) => {
+      const rootA = root(a);
+      const rootB = root(b);
+      if (rootA !== rootB) {
+        parent[rootB] = rootA;
+      }
+    };
+
+    for (let a = 0; a < candidates.length; a++) {
+      for (let b = a + 1; b < candidates.length; b++) {
+        const dx = candidates[a].screenX - candidates[b].screenX;
+        const dy = candidates[a].screenY - candidates[b].screenY;
+        if (Math.hypot(dx, dy) <= LABEL_COLLISION_RADIUS_PX) {
+          join(a, b);
+        }
+      }
+    }
+
+    const clusters = new Map<number, typeof candidates>();
+    candidates.forEach((candidate, index) => {
+      const key = root(index);
+      const cluster = clusters.get(key) ?? [];
+      cluster.push(candidate);
+      clusters.set(key, cluster);
+    });
+
+    const nextLevels = levels.current;
+    nextLevels.clear();
+    for (const cluster of clusters.values()) {
+      // 選択中を段0に固定し、他は画面上の並びで安定させて揺れを防ぐ。
+      cluster.sort((a, b) => {
+        if (a.id === selectedPlotId) return -1;
+        if (b.id === selectedPlotId) return 1;
+        return a.screenX - b.screenX || a.id.localeCompare(b.id, 'ja');
+      });
+      cluster.forEach((candidate, index) => {
+        nextLevels.set(candidate.id, index);
+      });
+    }
+  }, -1);
+
+  return null;
+}
 
 function ExplorationPlot({
   plot,
   region,
-  selectedSegmentIndex,
+  segmentCenter,
+  labelLevels,
   selectedPlotId,
-  selectedPlot,
   onSelect,
 }: {
   plot: UserPlotRow;
   region: TelescopeRegionDefinition;
-  selectedSegmentIndex: number;
+  /** 選択セグメント中心（統一空間） */
+  segmentCenter: readonly [number, number];
+  labelLevels: LabelLevelsRef;
   selectedPlotId: string;
-  selectedPlot: UserPlotRow | null;
   onSelect: (id: string) => void;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const coreRef = useRef<THREE.Mesh>(null);
   const hitRef = useRef<THREE.Mesh>(null);
   const wavesRef = useRef<THREE.Group>(null);
+  const leaderRef = useRef<HTMLDivElement>(null);
+  const lineRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const nearbyRef = useRef(false);
+  const nowLevel = useRef(0);
   const color = useMemo(() => plotColorFromRow(plot), [plot]);
   const isSelected = plot.word_id === selectedPlotId;
 
@@ -49,20 +161,12 @@ function ExplorationPlot({
     const time = clock.elapsedTime;
     const [x, y] = getTelescopeRegionPlotPosition(region, plot, time);
     group.position.set(x, y, 0.04);
-    // 公転中の純粋感情プロットは位置によらず所属セグメント固定
-    const isInSelectedSegment =
-      getLayer3SegmentIndexForPlot(region, plot, time) === selectedSegmentIndex;
 
-    let isNearby = isSelected && isInSelectedSegment;
-    if (!isSelected && isInSelectedSegment && selectedPlot) {
-      const [sx, sy] = getTelescopeRegionPlotPosition(
-        region,
-        selectedPlot,
-        time,
-      );
-      isNearby =
-        Math.hypot(x - sx, y - sy) <= TELESCOPE_EXPLORATION_VIEW.nearbyRadius;
-    }
+    // 選択可否＝選択セグメント中心からの距離。感情空間ルール外の点は除外済み
+    const isNearby =
+      isSelected ||
+      Math.hypot(x - segmentCenter[0], y - segmentCenter[1]) <=
+        TELESCOPE_EXPLORATION_VIEW.nearbyRadius;
     nearbyRef.current = isNearby;
 
     const material = core.material as THREE.MeshBasicMaterial;
@@ -95,8 +199,21 @@ function ExplorationPlot({
       }
     }
 
-    if (labelRef.current) {
-      labelRef.current.style.opacity = isNearby && !isSelected ? '0.92' : '0';
+    const leader = leaderRef.current;
+    const line = lineRef.current;
+    const label = labelRef.current;
+    if (leader && line && label) {
+      const shown = isSelected || isNearby;
+      leader.style.opacity = shown ? (isSelected ? '1' : '0.9') : '0';
+
+      // 近接クラスタ内では引き出し線を段違いにして重なりを避ける
+      const level = labelLevels.current.get(plot.word_id) ?? 0;
+      if (level !== nowLevel.current) {
+        nowLevel.current = level;
+        const lineLength = LABEL_LEADER_BASE_PX + level * LABEL_LEADER_STEP_PX;
+        line.style.height = `${lineLength}px`;
+        label.style.bottom = `${LABEL_LEADER_GAP_PX + lineLength + 6}px`;
+      }
     }
   });
 
@@ -141,33 +258,54 @@ function ExplorationPlot({
           ))}
         </group>
       ) : null}
-      {plot.wordType === 'adjective' || isPurePlot(plot) ? (
-        <Html
-          center
+      <Html center style={{ pointerEvents: 'none' }}>
+        {/* 点を原点として上方向へ: 引き出し線 → 縦書きラベル */}
+        <div
+          ref={leaderRef}
+          aria-hidden
           style={{
-            pointerEvents: 'none',
-            // 点の直下にラベルの上端が来るよう下げつつ、見た目のずれを補正
-            transform: 'translate(-28px, calc(50% + 10px))',
+            position: 'relative',
+            width: 0,
+            height: 0,
+            opacity: 0,
+            transition: 'opacity 200ms ease',
           }}
         >
+          <div
+            ref={lineRef}
+            style={{
+              position: 'absolute',
+              left: -0.75,
+              bottom: LABEL_LEADER_GAP_PX,
+              width: 1.5,
+              height: LABEL_LEADER_BASE_PX,
+              background: color,
+              boxShadow: `0 0 5px ${color}88`,
+              transition: 'height 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+            }}
+          />
           <div
             ref={labelRef}
             className="font-momochidori font-momochidori--medium"
             style={{
+              position: 'absolute',
+              left: 0,
+              bottom: LABEL_LEADER_GAP_PX + LABEL_LEADER_BASE_PX + 6,
+              transform: 'translateX(-50%)',
               writingMode: 'vertical-rl',
               textOrientation: 'upright',
               whiteSpace: 'nowrap',
-              fontSize: 35,
+              fontSize: 32,
               letterSpacing: '0.1em',
               color,
-              opacity: 0,
               textShadow: '0 0 6px rgba(0,0,0,0.55)',
+              transition: 'bottom 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
             }}
           >
             {plot.word_id}
           </div>
-        </Html>
-      ) : null}
+        </div>
+      </Html>
     </group>
   );
 }
@@ -191,21 +329,37 @@ export function Layer4ExplorationLayer({
   selectedPlotId,
   onSelectPlot,
 }: Layer4ExplorationLayerProps) {
-  const selectedPlot = useMemo(
-    () => plots.find((plot) => plot.word_id === selectedPlotId) ?? null,
-    [plots, selectedPlotId],
+  const segmentCenter = useMemo<[number, number]>(() => {
+    const [cx, cy] = getLayer3SegmentWorldCenter(region, selectedSegmentIndex);
+    return [cx, cy];
+  }, [region, selectedSegmentIndex]);
+
+  const selectablePlots = useMemo(
+    () =>
+      plots.filter((plot) =>
+        isTelescopeExplorationSelectablePlot(region, plot),
+      ),
+    [plots, region],
   );
+  const labelLevels = useRef<Map<string, number>>(new Map());
 
   return (
     <group>
-      {plots.map((plot) => (
+      <ExplorationLabelLevelCoordinator
+        plots={selectablePlots}
+        region={region}
+        segmentCenter={segmentCenter}
+        selectedPlotId={selectedPlotId}
+        levels={labelLevels}
+      />
+      {selectablePlots.map((plot) => (
         <ExplorationPlot
           key={plot.word_id}
           plot={plot}
           region={region}
-          selectedSegmentIndex={selectedSegmentIndex}
+          segmentCenter={segmentCenter}
+          labelLevels={labelLevels}
           selectedPlotId={selectedPlotId}
-          selectedPlot={selectedPlot}
           onSelect={onSelectPlot}
         />
       ))}

@@ -183,6 +183,93 @@ export function getLayer3SegmentIndexAt(
 }
 
 /**
+ * バー上の progress（0=start … 1=end）が属する区画 index。
+ * カメラ位置に連動するガイドラベル用。
+ */
+export function getLayer3SegmentIndexForProgress(
+  progress: number,
+  width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2,
+): number {
+  const { pureRadius, dyadRadius, halfSpan, midHalf, segmentLength } =
+    getLayer3SegmentMetrics(width);
+  const perSide = LAYER3_BAR_MID_SEGMENTS_PER_SIDE;
+  const along =
+    (Math.min(1, Math.max(0, progress)) - 0.5) *
+    TELESCOPE_REGION_VIEW.spanLength;
+
+  if (Math.abs(along + halfSpan) <= pureRadius) {
+    return 0;
+  }
+  if (Math.abs(along) <= dyadRadius) {
+    return perSide + 1;
+  }
+  if (Math.abs(along - halfSpan) <= pureRadius) {
+    return LAYER3_SEGMENT_COUNT - 1;
+  }
+  if (along >= -midHalf && along < -dyadRadius) {
+    const index = Math.min(
+      perSide - 1,
+      Math.floor((along + midHalf) / segmentLength),
+    );
+    return index + 1;
+  }
+  if (along > dyadRadius && along <= midHalf) {
+    const index = Math.min(
+      perSide - 1,
+      Math.floor((along - dyadRadius) / segmentLength),
+    );
+    return perSide + 2 + index;
+  }
+  // 端円の外側にわずかに出た場合は近い端へ寄せる
+  return along < 0 ? 0 : LAYER3_SEGMENT_COUNT - 1;
+}
+
+/**
+ * レイヤー3ガイドラベル用の区画文言。
+ * 例（悲しみ・悲観・期待）:
+ * 悲しみ / 悲観よりの悲しみ / 悲しみと悲観の中間 / 悲しみよりの悲観 /
+ * 悲観 / 期待よりの悲観 / 期待と悲観の中間 / 悲観よりの期待 / 期待
+ */
+export function getLayer3SegmentGuideLabel(
+  segmentIndex: number,
+  startLabel: string,
+  midLabel: string,
+  endLabel: string,
+): string {
+  const perSide = LAYER3_BAR_MID_SEGMENTS_PER_SIDE;
+  const dyadIndex = perSide + 1;
+  if (segmentIndex <= 0) {
+    return startLabel;
+  }
+  if (segmentIndex >= LAYER3_SEGMENT_COUNT - 1) {
+    return endLabel;
+  }
+  if (segmentIndex === dyadIndex) {
+    return midLabel;
+  }
+
+  if (segmentIndex <= perSide) {
+    const slot = segmentIndex - 1;
+    if (perSide === 1 || (slot > 0 && slot < perSide - 1)) {
+      return `${startLabel}と${midLabel}の中間`;
+    }
+    if (slot === 0) {
+      return `${midLabel}よりの${startLabel}`;
+    }
+    return `${startLabel}よりの${midLabel}`;
+  }
+
+  const slot = segmentIndex - (perSide + 2);
+  if (perSide === 1 || (slot > 0 && slot < perSide - 1)) {
+    return `${endLabel}と${midLabel}の中間`;
+  }
+  if (slot === 0) {
+    return `${endLabel}よりの${midLabel}`;
+  }
+  return `${midLabel}よりの${endLabel}`;
+}
+
+/**
  * プロット単位の所属区画。
  * 公転する純粋感情プロットは位置に関係なく、常にその感情の円形セグメント
  * （start/end の純粋円・中央の24感情円）に固定する。
