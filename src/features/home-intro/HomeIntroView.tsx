@@ -2,7 +2,6 @@ import { useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ROUTES } from '../../routes/paths';
 import { IntroLogoScreen } from './components/IntroLogoScreen';
-import { IntroSky } from './components/IntroSky';
 import { IntroWalker } from './components/IntroWalker';
 import { WalkScene } from './components/WalkScene';
 import { HOME_INTRO_STEPS } from './steps';
@@ -20,7 +19,6 @@ export function HomeIntroView() {
         <IntroLogoScreen />
       ) : (
         <>
-          {activeStep.content && <IntroSky stepKey={activeStep.id} content={activeStep.content} />}
           <WalkScene stepIndex={activeIndex} />
           <IntroWalker stepping={isAnimating} />
         </>
