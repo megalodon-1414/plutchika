@@ -78,6 +78,25 @@ export function getLayer3SegmentLayout(
   return segments;
 }
 
+/** 区画中心の統一空間ワールド座標 */
+export function getLayer3SegmentWorldCenter(
+  region: TelescopeRegionDefinition,
+  segmentIndex: number,
+  width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2,
+): [number, number, number] {
+  const segments = getLayer3SegmentLayout(width);
+  const segment =
+    segments[segmentIndex] ??
+    segments[Math.floor(segments.length / 2)] ??
+    segments[0];
+  const [ux, uy] = region.direction;
+  return [
+    region.midpoint[0] + ux * segment.centerAlong,
+    region.midpoint[1] + uy * segment.centerAlong,
+    0,
+  ];
+}
+
 /** 統一空間上の (x,y) が属する区画 index。範囲外は -1 */
 export function getLayer3SegmentIndexAt(
   region: TelescopeRegionDefinition,

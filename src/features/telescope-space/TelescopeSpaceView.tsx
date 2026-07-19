@@ -26,7 +26,14 @@ import {
   resolveFocusBasicId,
   type TelescopeViewFocus,
 } from './TelescopeGalaxyLayer';
-import { pickRandomPlotIdInSegment } from './layer3Segments';
+import {
+  groupPlotsByLayer3Segment,
+  getLayer3SegmentIndexAt,
+  LAYER3_BAR_MID_SEGMENT_COUNT,
+  pickRandomPlotIdInSegment,
+} from './layer3Segments';
+import { getTelescopeRegionDefinition } from './layer3Region';
+import { getTelescopeRegionPlotPosition } from './layer4Exploration';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
 import { TelescopeSpaceCanvas } from './TelescopeSpaceCanvas';
 import { TelescopeZoomLadder, zoomLevelIndex } from './TelescopeZoomLadder';
@@ -92,6 +99,25 @@ function apertureForPhase(phase: TelescopeZoomPhase): number {
   }
 }
 
+/**
+ * 画面クランプ後にさらに掛けるレンズ倍率。
+ * 深い階層では円が画面高さを超えて広がる（上下は切れて見える）。
+ */
+function eyepieceOverscanForPhase(phase: TelescopeZoomPhase): number {
+  switch (phase) {
+    case 'entering-region':
+    case 'region':
+    case 'leaving-region':
+      return 1.15;
+    case 'entering-exploration':
+    case 'exploration':
+    case 'leaving-exploration':
+      return 1.3;
+    default:
+      return 1;
+  }
+}
+
 function layerLabel(settled: TelescopeSettledPhase): string {
   switch (settled) {
     case 'far':
@@ -131,6 +157,13 @@ export function TelescopeSpaceView() {
   const [explorationPlotId, setExplorationPlotId] = useState<string | null>(
     null,
   );
+  const [explorationSegmentIndex, setExplorationSegmentIndex] = useState<
+    number | null
+  >(null);
+  const [explorationArrowPulse, setExplorationArrowPulse] = useState<{
+    direction: -1 | 1;
+    at: number;
+  } | null>(null);
   const [minimapSync, setMinimapSync] = useState<MinimapSyncState | null>(null);
   const [wordPlots, setWordPlots] = useState<UserPlotRow[]>([]);
   const [infoUiScale, setInfoUiScale] = useState(getInfoUiScale);
@@ -178,6 +211,10 @@ export function TelescopeSpaceView() {
   const settled = settledFromPhase(zoomPhase);
   const layer = layerLabel(settled);
   const aperture = useMemo(() => apertureForPhase(zoomPhase), [zoomPhase]);
+  const eyepieceOverscan = useMemo(
+    () => eyepieceOverscanForPhase(zoomPhase),
+    [zoomPhase],
+  );
   const showHud = true;
   const showRimGlow = settled !== 'far';
 
@@ -243,6 +280,7 @@ export function TelescopeSpaceView() {
           return prev;
         }
         setExplorationPlotId(startId);
+        setExplorationSegmentIndex(focus.segmentIndex);
         setLayer2HudActive(false);
         return 'entering-exploration';
       }
@@ -282,10 +320,12 @@ export function TelescopeSpaceView() {
       if (phase === 'detail') {
         setSelectedDyadId(null);
         setExplorationPlotId(null);
+        setExplorationSegmentIndex(null);
         setLayer2HudActive(true);
       }
       if (phase === 'region') {
         setExplorationPlotId(null);
+        setExplorationSegmentIndex(null);
       }
       const target = retreatTargetRef.current;
       if (target && zoomLevelIndex(phase) > zoomLevelIndex(target)) {
@@ -297,9 +337,25 @@ export function TelescopeSpaceView() {
     [startZoomOutStep],
   );
 
-  const handleSelectExplorationPlot = useCallback((id: string) => {
-    setExplorationPlotId(id);
-  }, []);
+  const handleSelectExplorationPlot = useCallback(
+    (id: string) => {
+      setExplorationPlotId(id);
+      const plot = wordPlots.find((row) => row.word_id === id);
+      if (!plot || !selectedDyadId) {
+        return;
+      }
+      const region = getTelescopeRegionDefinition(selectedDyadId, focusBasicId);
+      if (!region) {
+        return;
+      }
+      const [x, y] = getTelescopeRegionPlotPosition(region, plot, 0);
+      const index = getLayer3SegmentIndexAt(region, x, y);
+      if (index >= 0) {
+        setExplorationSegmentIndex(index);
+      }
+    },
+    [wordPlots, selectedDyadId, focusBasicId],
+  );
 
   const handleViewFocus = useCallback((focus: TelescopeViewFocus) => {
     setViewFocus(focus);
@@ -338,6 +394,74 @@ export function TelescopeSpaceView() {
     }
     return { label: plot.word_id, color: plotColorFromRow(plot) };
   }, [explorationPlotId, wordPlots]);
+  const explorationPlotsBySegment = useMemo(() => {
+    if (!selectedDyadId) {
+      return new Map<number, string[]>();
+    }
+    const region = getTelescopeRegionDefinition(selectedDyadId, focusBasicId);
+    if (!region) {
+      return new Map<number, string[]>();
+    }
+    const allowedPrimary = new Set<string>([
+      selectedDyadId,
+      region.start.id,
+      region.end.id,
+    ]);
+    return groupPlotsByLayer3Segment(
+      region,
+      wordPlots.filter((plot) => allowedPrimary.has(plot.primaryId)),
+    );
+  }, [selectedDyadId, focusBasicId, wordPlots]);
+  /** 指定方向で次に点が入っている区画を探す（空き区画は飛ばす） */
+  const findOccupiedExplorationSegment = useCallback(
+    (fromIndex: number, direction: -1 | 1): number | null => {
+      const segmentCount = LAYER3_BAR_MID_SEGMENT_COUNT + 2;
+      for (
+        let index = fromIndex + direction;
+        index >= 0 && index < segmentCount;
+        index += direction
+      ) {
+        if ((explorationPlotsBySegment.get(index)?.length ?? 0) > 0) {
+          return index;
+        }
+      }
+      return null;
+    },
+    [explorationPlotsBySegment],
+  );
+  const handleMoveExplorationSegment = useCallback(
+    (direction: -1 | 1) => {
+      if (explorationSegmentIndex == null || busy) {
+        return;
+      }
+      const nextIndex = findOccupiedExplorationSegment(
+        explorationSegmentIndex,
+        direction,
+      );
+      if (nextIndex == null) {
+        return;
+      }
+      const nextPlotIds = explorationPlotsBySegment.get(nextIndex) ?? [];
+      const nextPlotId = pickRandomPlotIdInSegment(nextPlotIds);
+      if (!nextPlotId) {
+        return;
+      }
+      setExplorationSegmentIndex(nextIndex);
+      setExplorationPlotId(nextPlotId);
+    },
+    [
+      busy,
+      explorationPlotsBySegment,
+      explorationSegmentIndex,
+      findOccupiedExplorationSegment,
+    ],
+  );
+  const canMoveExplorationPrevious =
+    explorationSegmentIndex != null &&
+    findOccupiedExplorationSegment(explorationSegmentIndex, -1) != null;
+  const canMoveExplorationNext =
+    explorationSegmentIndex != null &&
+    findOccupiedExplorationSegment(explorationSegmentIndex, 1) != null;
 
   return (
     <div
@@ -369,6 +493,7 @@ export function TelescopeSpaceView() {
 
       <TelescopeEyepiece
         aperture={aperture}
+        overscan={eyepieceOverscan}
         rimGlowColor={selectedEmotion?.color}
         innerOverlay={
           <>
@@ -400,6 +525,132 @@ export function TelescopeSpaceView() {
                 <TelescopeRegionPositionHud state={regionIndicatorRef} />
               </div>
             ) : null}
+            {explorationHudMode ? (
+              <style>{`
+                @keyframes telescopeArrowHover {
+                  0%, 100% { transform: rotate(30deg) translateX(0); }
+                  50% { transform: rotate(30deg) translateX(var(--arrow-nudge, 4px)); }
+                }
+                @keyframes telescopeArrowPress {
+                  0% { transform: rotate(30deg) scale(1); }
+                  35% { transform: rotate(30deg) scale(1.32); }
+                  100% { transform: rotate(30deg) scale(1); }
+                }
+                @keyframes telescopeArrowPulse {
+                  from { transform: scale(0.6); opacity: 0.9; }
+                  to { transform: scale(2); opacity: 0; }
+                }
+                .telescope-seg-arrow:hover:not(:disabled) .telescope-seg-arrow-icon {
+                  animation: telescopeArrowHover 900ms ease-in-out infinite;
+                  filter: drop-shadow(0 0 10px currentColor);
+                }
+                .telescope-seg-arrow:hover:not(:disabled) {
+                  opacity: 1 !important;
+                }
+              `}</style>
+            ) : null}
+            {explorationHudMode
+              ? ([
+                  // 左右端の位置を画面中心を軸に時計回りへ30度回した配置
+                  // (中心から38%: cos30≒0.866, sin30=0.5)
+                  {
+                    direction: -1 as const,
+                    label: '前のセグメントへ',
+                    left: '17.1%',
+                    top: '31%',
+                    enabled: canMoveExplorationPrevious,
+                  },
+                  {
+                    direction: 1 as const,
+                    label: '次のセグメントへ',
+                    left: '82.9%',
+                    top: '69%',
+                    enabled: canMoveExplorationNext,
+                  },
+                ] as const).map(({ direction, label, left, top, enabled }) => (
+                  <button
+                    key={direction}
+                    type="button"
+                    className="telescope-seg-arrow"
+                    aria-label={label}
+                    title={label}
+                    disabled={!enabled || busy}
+                    onClick={() => {
+                      handleMoveExplorationSegment(direction);
+                      setExplorationArrowPulse({ direction, at: Date.now() });
+                    }}
+                    style={{
+                      position: 'absolute',
+                      left,
+                      top,
+                      width: 58,
+                      height: 58,
+                      padding: 0,
+                      border: 0,
+                      background: 'transparent',
+                      color: selectedDyad?.color ?? '#f4ecf7',
+                      opacity: enabled && !busy ? 0.9 : 0.2,
+                      filter:
+                        enabled && !busy
+                          ? `drop-shadow(0 0 8px ${selectedDyad?.color ?? '#ffffff'})`
+                          : 'none',
+                      transform: 'translate(-50%, -50%)',
+                      // 矢印上ではカーソルを隠す（選択アニメーションが代わりの手応え）
+                      cursor: 'none',
+                      pointerEvents: 'auto',
+                      transition: 'opacity 180ms ease, filter 180ms ease',
+                      // ホバー時の左右方向への微動（矢印向きに合わせる）
+                      ['--arrow-nudge' as string]:
+                        direction < 0 ? '-5px' : '5px',
+                    }}
+                  >
+                    {explorationArrowPulse?.direction === direction ? (
+                      <span
+                        key={explorationArrowPulse.at}
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          borderRadius: '50%',
+                          border: `2px solid ${selectedDyad?.color ?? '#f4ecf7'}`,
+                          opacity: 0,
+                          animation: 'telescopeArrowPulse 480ms ease-out',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    ) : null}
+                    <svg
+                      key={
+                        explorationArrowPulse?.direction === direction
+                          ? explorationArrowPulse.at
+                          : 'idle'
+                      }
+                      className="telescope-seg-arrow-icon"
+                      width="100%"
+                      height="100%"
+                      viewBox="0 0 58 58"
+                      aria-hidden
+                      style={{
+                        transform: 'rotate(30deg)',
+                        transformOrigin: '50% 50%',
+                        animation:
+                          explorationArrowPulse?.direction === direction
+                            ? 'telescopeArrowPress 320ms ease'
+                            : undefined,
+                      }}
+                    >
+                      <polygon
+                        points={
+                          direction < 0
+                            ? '38,11 16,29 38,47'
+                            : '20,11 42,29 20,47'
+                        }
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                ))
+              : null}
           </>
         }
         rimOverlay={
@@ -426,6 +677,7 @@ export function TelescopeSpaceView() {
           regionIndicator={regionIndicatorRef}
           segmentFocus={segmentFocusRef}
           explorationPlotId={explorationPlotId}
+          explorationSegmentIndex={explorationSegmentIndex}
           onSelectExplorationPlot={handleSelectExplorationPlot}
         />
       </TelescopeEyepiece>
@@ -436,26 +688,34 @@ export function TelescopeSpaceView() {
           right: 0,
           top: 0,
           bottom: 0,
-          width: 360,
+          width: Math.round(180 * infoUiScale),
           zIndex: 2,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'flex-end',
-          paddingRight: 28,
+          paddingRight: Math.round(28 * infoUiScale),
           boxSizing: 'border-box',
           background:
             'linear-gradient(to left, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.56) 38%, rgba(0, 0, 0, 0) 100%)',
           pointerEvents: 'none',
         }}
       >
-        <TelescopeZoomLadder
-          current={settled}
-          busy={busy}
-          onRetreatTo={handleRetreatTo}
-          selectedEmotion={selectedEmotion}
-          selectedDetailEmotion={selectedDyad}
-          selectedExplorationEmotion={selectedExploration}
-        />
+        <div
+          style={{
+            transform: `scale(${infoUiScale})`,
+            transformOrigin: 'center right',
+            transition: 'transform 180ms ease',
+          }}
+        >
+          <TelescopeZoomLadder
+            current={settled}
+            busy={busy}
+            onRetreatTo={handleRetreatTo}
+            selectedEmotion={selectedEmotion}
+            selectedDetailEmotion={selectedDyad}
+            selectedExplorationEmotion={selectedExploration}
+          />
+        </div>
       </div>
 
       <div

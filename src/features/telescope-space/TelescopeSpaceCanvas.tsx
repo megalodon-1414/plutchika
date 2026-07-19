@@ -34,6 +34,11 @@ import {
   type TelescopeFocusCameraPose,
 } from './focusCameraView';
 import {
+  clearTelescopePointer,
+  getTelescopeCanvasCursor,
+  updateTelescopePointerFromClient,
+} from './telescopeAim';
+import {
   computeTelescopeRegionCameraPose,
   getTelescopeRegionDefinition,
   TELESCOPE_REGION_VIEW,
@@ -44,6 +49,7 @@ import {
   getTelescopeRegionPlotPosition,
   TELESCOPE_EXPLORATION_VIEW,
 } from './layer4Exploration';
+import { getLayer3SegmentIndexAt, getLayer3SegmentWorldCenter } from './layer3Segments';
 import {
   TelescopeGalaxyLayer,
   type TelescopeRegionIndicatorState,
@@ -66,8 +72,10 @@ interface TelescopeSpaceCanvasProps {
   regionIndicator?: { current: TelescopeRegionIndicatorState };
   /** レイヤー3の中央検知区画（レイヤー4入口） */
   segmentFocus?: { current: TelescopeSegmentFocusState };
-  /** レイヤー4で選択中の感情点 */
+  /** レイヤー4/5で選択中の感情点 */
   explorationPlotId?: string | null;
+  /** レイヤー5の注視点＝選択セグメント中心 */
+  explorationSegmentIndex?: number | null;
   onSelectExplorationPlot?: (id: string) => void;
 }
 
@@ -323,6 +331,7 @@ function TelescopeCameraController({
   selectedDyadId,
   wordPlots,
   explorationPlotId,
+  explorationSegmentIndex,
   onZoomComplete,
   onCanvasClickZoom,
   onLayer2SceneChange,
@@ -336,6 +345,7 @@ function TelescopeCameraController({
   selectedDyadId: EmotionId | null;
   wordPlots: readonly UserPlotRow[];
   explorationPlotId?: string | null;
+  explorationSegmentIndex?: number | null;
   onZoomComplete?: (phase: TelescopeSettledPhase) => void;
   onCanvasClickZoom?: () => void;
   onLayer2SceneChange?: (active: boolean) => void;
@@ -372,8 +382,11 @@ function TelescopeCameraController({
   const explorationRetargetProgress = useRef(1);
   const wordPlotsRef = useRef(wordPlots);
   const explorationPlotIdRef = useRef(explorationPlotId);
+  const explorationSegmentIndexRef = useRef(explorationSegmentIndex ?? null);
+  const lastExplorationSegmentIndex = useRef<number | null>(null);
   wordPlotsRef.current = wordPlots;
   explorationPlotIdRef.current = explorationPlotId;
+  explorationSegmentIndexRef.current = explorationSegmentIndex ?? null;
 
   const progress = useRef(1);
   const animDurationMs = useRef(TELESCOPE_ZOOM_MS);
@@ -703,7 +716,17 @@ function TelescopeCameraController({
       applyRegionPose(camera, region, regionProgress.current);
       fromPos.current.copy(camera.position);
       fromLook.current.copy(TMP_LOOK);
-      const lookAt = getTelescopeRegionPlotPosition(region, plot, 0);
+      // 注視点は選択点ではなく、選択セグメントの中心
+      const segmentIndex =
+        explorationSegmentIndex ??
+        (() => {
+          const [x, y] = getTelescopeRegionPlotPosition(region, plot, 0);
+          return getLayer3SegmentIndexAt(region, x, y);
+        })();
+      const lookAt =
+        segmentIndex != null && segmentIndex >= 0
+          ? getLayer3SegmentWorldCenter(region, segmentIndex)
+          : getTelescopeRegionPlotPosition(region, plot, 0);
       const pose = computeTelescopeExplorationCameraPose(region, lookAt);
       toPos.current.set(...pose.position);
       toLook.current.set(...pose.lookAt);
@@ -711,6 +734,8 @@ function TelescopeCameraController({
         .set(...pose.position)
         .sub(new THREE.Vector3(...pose.lookAt));
       lastExplorationPlotId.current = explorationPlotId;
+      lastExplorationSegmentIndex.current =
+        segmentIndex != null && segmentIndex >= 0 ? segmentIndex : null;
       fromFov.current = camera.fov;
       toFov.current = TELESCOPE_EXPLORATION_VIEW.fov;
       animKind.current = 'free';
@@ -853,7 +878,7 @@ function TelescopeCameraController({
       targetTheta.current = 0;
       targetPhi.current = TELESCOPE_ORBIT_PHI_CENTER;
     }
-  }, [zoomPhase, focusBasicId, selectedDyadId, explorationPlotId, wordPlots, camera]);
+  }, [zoomPhase, focusBasicId, selectedDyadId, explorationPlotId, explorationSegmentIndex, wordPlots, camera]);
 
   useEffect(() => {
     const el = gl.domElement;
@@ -864,10 +889,19 @@ function TelescopeCameraController({
     let lastY = 0;
     let dragged = false;
 
+    const syncAim = (event: PointerEvent) => {
+      updateTelescopePointerFromClient(
+        event.clientX,
+        event.clientY,
+        el.getBoundingClientRect(),
+      );
+    };
+
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) {
         return;
       }
+      syncAim(event);
       pointerId = event.pointerId;
       startX = event.clientX;
       startY = event.clientY;
@@ -875,10 +909,11 @@ function TelescopeCameraController({
       lastY = event.clientY;
       dragged = false;
       el.setPointerCapture(event.pointerId);
-      el.style.cursor = 'grabbing';
+      el.style.cursor = getTelescopeCanvasCursor('grabbing');
     };
 
     const onPointerMove = (event: PointerEvent) => {
+      syncAim(event);
       if (pointerId !== event.pointerId) {
         return;
       }
@@ -941,11 +976,12 @@ function TelescopeCameraController({
     };
 
     const onPointerUp = (event: PointerEvent) => {
+      syncAim(event);
       if (pointerId !== event.pointerId) {
         return;
       }
       pointerId = null;
-      el.style.cursor = 'grab';
+      el.style.cursor = getTelescopeCanvasCursor('grab');
       try {
         el.releasePointerCapture(event.pointerId);
       } catch {
@@ -960,18 +996,28 @@ function TelescopeCameraController({
       }
     };
 
+    const onPointerLeave = () => {
+      // ドラッグ中は capture で追従するため、非ドラッグ時のみ照準を解除
+      if (pointerId == null) {
+        clearTelescopePointer();
+      }
+    };
+
     el.addEventListener('pointerdown', onPointerDown);
     el.addEventListener('pointermove', onPointerMove);
     el.addEventListener('pointerup', onPointerUp);
     el.addEventListener('pointercancel', onPointerUp);
+    el.addEventListener('pointerleave', onPointerLeave);
     el.style.touchAction = 'none';
-    el.style.cursor = 'grab';
+    el.style.cursor = getTelescopeCanvasCursor('grab');
 
     return () => {
+      clearTelescopePointer();
       el.removeEventListener('pointerdown', onPointerDown);
       el.removeEventListener('pointermove', onPointerMove);
       el.removeEventListener('pointerup', onPointerUp);
       el.removeEventListener('pointercancel', onPointerUp);
+      el.removeEventListener('pointerleave', onPointerLeave);
     };
   }, [gl]);
 
@@ -1187,29 +1233,27 @@ function TelescopeCameraController({
     }
 
     if (mode.current === 'exploration' && regionDefinition.current) {
-      const plotId = explorationPlotIdRef.current;
-      const plot = plotId
-        ? wordPlotsRef.current.find((row) => row.word_id === plotId)
-        : null;
-      if (plot) {
-        const lookAt = getTelescopeRegionPlotPosition(
-          regionDefinition.current,
-          plot,
-          clock.elapsedTime,
-        );
+      const region = regionDefinition.current;
+      const segmentIndex = explorationSegmentIndexRef.current;
+      if (segmentIndex != null && segmentIndex >= 0) {
+        const lookAt = getLayer3SegmentWorldCenter(region, segmentIndex);
 
         if (
-          lastExplorationPlotId.current &&
-          lastExplorationPlotId.current !== plotId
+          lastExplorationSegmentIndex.current != null &&
+          lastExplorationSegmentIndex.current !== segmentIndex
         ) {
           explorationFromLook.current.copy(explorationLook.current);
           explorationToLook.current.set(...lookAt);
           explorationRetargetProgress.current = 0;
           explorationRetargeting.current = true;
-          lastExplorationPlotId.current = plotId ?? null;
-        } else if (!lastExplorationPlotId.current) {
-          lastExplorationPlotId.current = plotId ?? null;
+          lastExplorationSegmentIndex.current = segmentIndex;
+        } else if (lastExplorationSegmentIndex.current == null) {
+          lastExplorationSegmentIndex.current = segmentIndex;
         }
+
+        // プロット切替の追跡用（セグメント移動以外でも ID を同期）
+        lastExplorationPlotId.current =
+          explorationPlotIdRef.current ?? lastExplorationPlotId.current;
 
         if (explorationRetargeting.current) {
           explorationRetargetProgress.current = Math.min(
@@ -1234,7 +1278,7 @@ function TelescopeCameraController({
 
         applyExplorationPose(
           camera,
-          regionDefinition.current,
+          region,
           [
             explorationLook.current.x,
             explorationLook.current.y,
@@ -1460,6 +1504,7 @@ function DetailVisibilityBridge({
   regionIndicator,
   segmentFocus,
   explorationPlotId,
+  explorationSegmentIndex,
   onSelectExplorationPlot,
 }: {
   zoomPhase: TelescopeZoomPhase;
@@ -1473,6 +1518,7 @@ function DetailVisibilityBridge({
   regionIndicator?: { current: TelescopeRegionIndicatorState };
   segmentFocus?: { current: TelescopeSegmentFocusState };
   explorationPlotId?: string | null;
+  explorationSegmentIndex?: number | null;
   onSelectExplorationPlot?: (id: string) => void;
 }) {
   const { camera } = useThree();
@@ -1554,6 +1600,7 @@ function DetailVisibilityBridge({
       regionIndicator={regionIndicator}
       segmentFocus={segmentFocus}
       explorationPlotId={explorationPlotId}
+      explorationSegmentIndex={explorationSegmentIndex}
       onSelectExplorationPlot={onSelectExplorationPlot}
     />
   );
@@ -1573,6 +1620,7 @@ export function TelescopeSpaceCanvas({
   regionIndicator,
   segmentFocus,
   explorationPlotId = null,
+  explorationSegmentIndex = null,
   onSelectExplorationPlot,
 }: TelescopeSpaceCanvasProps) {
   const [layer2SceneActive, setLayer2SceneActive] = useState(false);
@@ -1621,7 +1669,12 @@ export function TelescopeSpaceCanvas({
         fov: TELESCOPE_CAMERA_FOV,
       }}
       dpr={[1, 1.5]}
-      style={{ width: '100%', height: '100%', display: 'block', cursor: 'grab' }}
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'block',
+        cursor: getTelescopeCanvasCursor('grab'),
+      }}
     >
       <color attach="background" args={['#02030a']} />
       <TelescopeCameraController
@@ -1630,6 +1683,7 @@ export function TelescopeSpaceCanvas({
         selectedDyadId={selectedDyadId}
         wordPlots={wordPlots}
         explorationPlotId={explorationPlotId}
+        explorationSegmentIndex={explorationSegmentIndex}
         onZoomComplete={onZoomComplete}
         onCanvasClickZoom={onCanvasClickZoom}
         onLayer2SceneChange={setLayer2SceneActive}
@@ -1658,6 +1712,7 @@ export function TelescopeSpaceCanvas({
         regionIndicator={regionIndicator}
         segmentFocus={segmentFocus}
         explorationPlotId={explorationPlotId}
+        explorationSegmentIndex={explorationSegmentIndex}
         onSelectExplorationPlot={onSelectExplorationPlot}
       />
     </Canvas>

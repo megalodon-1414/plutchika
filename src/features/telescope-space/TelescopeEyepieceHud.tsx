@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { getEmotionById, type EmotionId } from '../../data/emotions';
 import type { TelescopeRegionIndicatorState } from './TelescopeGalaxyLayer';
+import {
+  getTelescopeAimCssFraction,
+  isTelescopeCursorAimActive,
+  TELESCOPE_AIM,
+} from './telescopeAim';
 import type {
   TelescopeNearbyEmotionGlow,
   TelescopeViewFocus,
@@ -27,6 +32,16 @@ const TRACK_LAYOUT_TRANSITION =
 function getEmotionLabel(id: string): string {
   return getEmotionById(id as EmotionId).label;
 }
+
+/** 照準ピン（逆しずく型）。先端が (12, 23) ＝下端中央 */
+const AIM_PIN_PATH =
+  'M12 23 C12 23 4.5 13.6 4.5 8.6 C4.5 4.3 7.9 1.5 12 1.5 C16.1 1.5 19.5 4.3 19.5 8.6 C19.5 13.6 12 23 12 23 Z';
+/** ピン頭部（縁の円）の中心。白い円をここに置く */
+const AIM_PIN_HEAD_CX = 12;
+const AIM_PIN_HEAD_CY = 8.6;
+/** ピンが指す地点の楕円サイズ（px） */
+const AIM_GROUND_ELLIPSE_W = 26;
+const AIM_GROUND_ELLIPSE_H = 10;
 
 /**
  * 未検知時も同じ位置に白い円を表示し、検知時は感情色の円と中央下のラベルに切り替える。
@@ -67,7 +82,7 @@ export function TelescopeInnerTrackLabel({
     : LAYER1_TRACK_CENTER_Y;
   const trackSize = `${trackRadius * 200}%`;
   const trackColor = emotion?.color ?? '#ffffff';
-  const idleOpacity = idle ? 0.42 : 1;
+  const idleOpacity = idle ? 0.62 : 1;
   const rawColorSources = [
     ...(emotion
       ? [{ color: emotion.color, angle: emotion.angle, weight: 1, center: true }]
@@ -99,6 +114,27 @@ export function TelescopeInnerTrackLabel({
       : emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
   const detectionLabel = detailMode ? emotion?.label ?? '' : '';
   const detectionColor = emotion?.color ?? 'rgba(244, 236, 247, 0.55)';
+  const aimAnchorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      const el = aimAnchorRef.current;
+      if (el) {
+        if (TELESCOPE_AIM.mode === 'cursor' && isTelescopeCursorAimActive()) {
+          const { x, y } = getTelescopeAimCssFraction();
+          el.style.left = `${x * 100}%`;
+          el.style.top = `${y * 100}%`;
+        } else {
+          el.style.left = '50%';
+          el.style.top = '50%';
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <div
@@ -109,6 +145,7 @@ export function TelescopeInnerTrackLabel({
         zIndex: 2,
       }}
     >
+      {/* 方向ラベルのレール円 — 画面固定のまま */}
       <div style={{ opacity: idleOpacity, transition: 'opacity 300ms ease' }}>
         <TrackCircle
           size={trackSize}
@@ -117,34 +154,84 @@ export function TelescopeInnerTrackLabel({
           thin={idle}
           flattened={regionMode}
         />
+      </div>
 
-        <svg
-          viewBox="0 0 24 24"
-          width="32"
-          height="32"
+      {/* 照準ピン — カーソル位置（検知点）を逆しずく型で示す */}
+      <div
+        ref={aimAnchorRef}
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          width: 0,
+          height: 0,
+          opacity: idleOpacity,
+          transition: 'opacity 300ms ease',
+        }}
+      >
+        <style>
+          {`@keyframes telescope-aim-ripple {
+  0% { transform: translate(-50%, -50%) scale(0.55); opacity: 0.5; }
+  100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+}`}
+        </style>
+        {/* ピンが指す地点の楕円（接地マーク） */}
+        <div
           aria-hidden
           style={{
             position: 'absolute',
-            left: '50%',
-            top: regionMode ? '50%' : detailMode ? '46%' : '50%',
-            // regionMode はレイヤー3カメラの仰角（≒35°）に合わせ、
-            // バー平面と平行に見えるよう約55°倒す
-            transform: regionMode
-              ? 'translate(-50%, -50%) perspective(180px) rotateX(55deg) scale(1.3)'
-              : detailMode
-                ? 'translate(-50%, -50%) perspective(180px) rotateX(62deg) scale(1.35)'
-                : 'translate(-50%, -50%) perspective(180px) rotateX(0deg) scale(1)',
-            transformOrigin: 'center',
-            transformStyle: 'preserve-3d',
+            left: 0,
+            top: 0,
+            width: AIM_GROUND_ELLIPSE_W,
+            height: AIM_GROUND_ELLIPSE_H,
+            transform: 'translate(-50%, -50%)',
+            borderRadius: '50%',
+            border: `1px solid ${trackColor}`,
+            opacity: idle ? 0.45 : 0.55,
+            boxShadow: `0 0 6px ${trackColor}44`,
+            transition:
+              'opacity 300ms ease, border-color 300ms ease, box-shadow 300ms ease',
+          }}
+        />
+        {/* 選択中の波紋 — 楕円が広がって消えるループ */}
+        {!idle
+          ? [0, 1].map((index) => (
+              <div
+                key={index}
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  width: AIM_GROUND_ELLIPSE_W,
+                  height: AIM_GROUND_ELLIPSE_H,
+                  borderRadius: '50%',
+                  border: `1px solid ${trackColor}`,
+                  opacity: 0,
+                  animation: `telescope-aim-ripple 1.8s ease-out ${index * 0.9}s infinite`,
+                }}
+              />
+            ))
+          : null}
+        <svg
+          viewBox="0 0 24 24"
+          width="30"
+          height="30"
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            // 先端（下端）が照準点に一致するよう上へずらす
+            transform: 'translate(-50%, -100%)',
+            transformOrigin: '50% 100%',
             overflow: 'visible',
             filter: `drop-shadow(0 0 4px ${trackColor}66)`,
-            transition:
-              'top 720ms cubic-bezier(0.22, 0.61, 0.36, 1), transform 720ms cubic-bezier(0.22, 0.61, 0.36, 1)',
           }}
         >
         <defs>
-          <clipPath id="telescope-center-star-clip">
-            <path d="M12 1 C12.25 7.6 16.4 11.75 23 12 C16.4 12.25 12.25 16.4 12 23 C11.75 16.4 7.6 12.25 1 12 C7.6 11.75 11.75 7.6 12 1 Z" />
+          <clipPath id="telescope-aim-pin-clip">
+            <path d={AIM_PIN_PATH} />
           </clipPath>
           <filter
             id="telescope-center-color-field-blur"
@@ -156,7 +243,7 @@ export function TelescopeInnerTrackLabel({
             <feGaussianBlur stdDeviation="4.2" />
           </filter>
         </defs>
-        <g clipPath="url(#telescope-center-star-clip)">
+        <g clipPath="url(#telescope-aim-pin-clip)">
           <rect
             x="0"
             y="0"
@@ -164,7 +251,7 @@ export function TelescopeInnerTrackLabel({
             height="24"
             style={{
               fill: fallbackSource.color,
-              opacity: idle ? 0.14 : 0.25,
+              opacity: idle ? 0.2 : 0.25,
               transition: 'fill 950ms ease, opacity 950ms ease',
             }}
           />
@@ -175,8 +262,8 @@ export function TelescopeInnerTrackLabel({
                 : 3.2 + (1 - source.weight) * 6.8;
               const dx = Math.cos(source.angle) * sourceDistance;
               const dy = -Math.sin(source.angle) * sourceDistance;
-              // SVGは24単位を32pxで表示しているためCSS移動量へ換算。
-              const cssScale = 32 / 24;
+              // SVGは24単位を30pxで表示しているためCSS移動量へ換算。
+              const cssScale = 30 / 24;
               return (
                 <g
                   key={index}
@@ -188,7 +275,7 @@ export function TelescopeInnerTrackLabel({
                 >
                   <circle
                     cx="12"
-                    cy="12"
+                    cy="9"
                     r={9 + source.weight * 3}
                     style={{
                       fill: source.color,
@@ -204,13 +291,24 @@ export function TelescopeInnerTrackLabel({
           </g>
         </g>
         <path
-          d="M12 1 C12.25 7.6 16.4 11.75 23 12 C16.4 12.25 12.25 16.4 12 23 C11.75 16.4 7.6 12.25 1 12 C7.6 11.75 11.75 7.6 12 1 Z"
+          d={AIM_PIN_PATH}
           fill="none"
           stroke={trackColor}
-          strokeWidth="0.28"
-          strokeOpacity={idle ? 0.22 : 0.38}
+          strokeWidth="0.6"
+          strokeOpacity={idle ? 0.5 : 0.6}
           style={{
             transition: 'stroke 950ms ease, stroke-opacity 950ms ease',
+          }}
+        />
+        {/* 縁部分（頭部）の中心の白い円 */}
+        <circle
+          cx={AIM_PIN_HEAD_CX}
+          cy={AIM_PIN_HEAD_CY}
+          r="2.3"
+          fill="#ffffff"
+          style={{
+            opacity: idle ? 0.8 : 0.92,
+            transition: 'opacity 300ms ease',
           }}
         />
       </svg>

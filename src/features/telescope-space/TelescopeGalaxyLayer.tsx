@@ -26,6 +26,12 @@ import {
 } from './constants';
 import { getRelatedFocusNodeIds, getDyadPartnerBasicIds } from './focusCameraView';
 import {
+  ndcAngleFromAim,
+  ndcDistanceSqToAim,
+  ndcDistanceToAim,
+  ndcDistanceToSegment,
+} from './telescopeAim';
+import {
   getTelescopeRegionDefinition,
   telescopeRegionToUnifiedSpace,
   TELESCOPE_REGION_VIEW,
@@ -51,6 +57,8 @@ export type { TelescopeNearestEmotion, TelescopeNearbyEmotionGlow, TelescopeView
 
 /** NDC でののぞき穴縁（正方形キャンバス内接円 ≈ 1） */
 const HOLE_EDGE_NDC = 0.92;
+/** 照準まわりの感情検知半径（NDC）。穴縁より狭くして精度を上げる */
+const DETECT_RADIUS_NDC = 0.72;
 /** 穴の外インジケータの最大距離 */
 const OUTSIDE_MAX_NDC = 3.5;
 /** ふち光は近い外側感情を複数出してよい */
@@ -680,16 +688,12 @@ function RelatedEmotionBars({
         ) {
           continue;
         }
-        const ax = _barProjectedStart.x;
-        const ay = _barProjectedStart.y;
-        const dx = _barProjectedEnd.x - ax;
-        const dy = _barProjectedEnd.y - ay;
-        const lengthSq = dx * dx + dy * dy;
-        const t =
-          lengthSq > 1e-8
-            ? THREE.MathUtils.clamp(-(ax * dx + ay * dy) / lengthSq, 0, 1)
-            : 0;
-        const distance = Math.hypot(ax + dx * t, ay + dy * t);
+        const { distance } = ndcDistanceToSegment(
+          _barProjectedStart.x,
+          _barProjectedStart.y,
+          _barProjectedEnd.x,
+          _barProjectedEnd.y,
+        );
         if (distance < focusedDistance) {
           focusedDistance = distance;
           focusedBarId = bar.id;
@@ -921,6 +925,12 @@ const PETAL_BACKDROP = {
   fillOpacity: 0.085,
   /** 輪郭線の不透明度（加算合成） */
   strokeOpacity: 0.16,
+  /** 検知中の感情の花弁の塗り不透明度 */
+  fillHighlightOpacity: 0.2,
+  /** 検知中の感情の花弁の輪郭不透明度 */
+  strokeHighlightOpacity: 0.34,
+  /** ハイライトのフェード速さ（damp係数） */
+  highlightDamp: 6,
   /** 意匠全体の縮尺 */
   scale: 0.8,
 } as const;
@@ -928,8 +938,45 @@ const PETAL_BACKDROP = {
 /**
  * 全レイヤー共通の背景意匠。8基本感情の方向に、感情色の花弁を
  * プルチックの環のように敷く。加算合成＋長手グラデーションで控えめに光らせる。
+ * highlightId の花弁はやや明るくハイライトする（検知中の感情）。
  */
-function PlutchikPetalBackdrop() {
+function PlutchikPetalBackdrop({
+  highlightRef,
+}: {
+  /** 検知中の基本感情 ID（毎フレーム更新される ref） */
+  highlightRef?: { readonly current: string | null };
+}) {
+  const fillMaterials = useRef(new Map<string, THREE.MeshBasicMaterial>());
+  const strokeMaterials = useRef(new Map<string, THREE.LineBasicMaterial>());
+
+  useFrame((_, delta) => {
+    const highlightId = highlightRef?.current ?? null;
+    for (const node of TELESCOPE_GALAXY_NODES) {
+      const highlighted = node.id === highlightId;
+      const fill = fillMaterials.current.get(node.id);
+      if (fill) {
+        fill.opacity = THREE.MathUtils.damp(
+          fill.opacity,
+          highlighted
+            ? PETAL_BACKDROP.fillHighlightOpacity
+            : PETAL_BACKDROP.fillOpacity,
+          PETAL_BACKDROP.highlightDamp,
+          delta,
+        );
+      }
+      const stroke = strokeMaterials.current.get(node.id);
+      if (stroke) {
+        stroke.opacity = THREE.MathUtils.damp(
+          stroke.opacity,
+          highlighted
+            ? PETAL_BACKDROP.strokeHighlightOpacity
+            : PETAL_BACKDROP.strokeOpacity,
+          PETAL_BACKDROP.highlightDamp,
+          delta,
+        );
+      }
+    }
+  });
   const { fillGeometry, strokeGeometry } = useMemo(() => {
     const inner = PETAL_BACKDROP.inner;
     const outer = TELESCOPE_GALAXY_RADIUS * PETAL_BACKDROP.outerScale;
@@ -990,6 +1037,13 @@ function PlutchikPetalBackdrop() {
           >
             <mesh geometry={fillGeometry} frustumCulled={false}>
               <meshBasicMaterial
+                ref={(material) => {
+                  if (material) {
+                    fillMaterials.current.set(node.id, material);
+                  } else {
+                    fillMaterials.current.delete(node.id);
+                  }
+                }}
                 color={node.color}
                 vertexColors
                 transparent
@@ -1003,6 +1057,13 @@ function PlutchikPetalBackdrop() {
             </mesh>
             <lineLoop geometry={strokeGeometry} frustumCulled={false}>
               <lineBasicMaterial
+                ref={(material) => {
+                  if (material) {
+                    strokeMaterials.current.set(node.id, material);
+                  } else {
+                    strokeMaterials.current.delete(node.id);
+                  }
+                }}
                 color={node.color}
                 transparent
                 opacity={PETAL_BACKDROP.strokeOpacity}
@@ -1126,7 +1187,7 @@ function Layer2EmotionLabel({
     const onScreen =
       _labelProjected.z >= -1 &&
       _labelProjected.z <= 1 &&
-      Math.hypot(_labelProjected.x, _labelProjected.y) <=
+      ndcDistanceToAim(_labelProjected.x, _labelProjected.y) <=
         LAYER2_LABEL_SELECT_RADIUS_NDC;
     selectedBlend.current = THREE.MathUtils.damp(
       selectedBlend.current,
@@ -1556,8 +1617,10 @@ function Layer3RegionPlots({
         ndcDistances[index] = Infinity;
         return;
       }
-      const distance =
-        _layer3PlotProjected.x ** 2 + _layer3PlotProjected.y ** 2;
+      const distance = ndcDistanceSqToAim(
+        _layer3PlotProjected.x,
+        _layer3PlotProjected.y,
+      );
       ndcDistances[index] = distance;
       if (distance < centeredDistance) {
         centeredDistance = distance;
@@ -1772,7 +1835,7 @@ function Layer3BarSegments({
       _layer3PlotProjected
         .set(worldX, worldY, LAYER3_PLOT_BASE_Z)
         .project(camera);
-      const centerDistance = Math.hypot(
+      const centerDistance = ndcDistanceToAim(
         _layer3PlotProjected.x,
         _layer3PlotProjected.y,
       );
@@ -1994,7 +2057,8 @@ function Layer3IndicatorReporter({
     const dxPx = (projEnd.x - projStart.x) * size.width * 0.5;
     const dyPx = -(projEnd.y - projStart.y) * size.height * 0.5;
 
-    // 画面中央の視線がバー平面（z=0）と交わる点 = 現在位置
+    // カメラ視線（画面中央）がバー平面（z=0）と交わる点 = 現在位置。
+    // 検知照準（カーソル）とは独立して、カメラのスクロール位置を示す。
     camera.getWorldDirection(viewDirection);
     let progress = state.current.progress;
     if (Math.abs(viewDirection.z) > 1e-5) {
@@ -2028,6 +2092,7 @@ function Layer3EmotionRegion({
   indicator,
   segmentFocus,
   explorationPlotId,
+  explorationSegmentIndex,
   onSelectExplorationPlot,
 }: {
   selectedDyadId: EmotionId;
@@ -2041,6 +2106,8 @@ function Layer3EmotionRegion({
   segmentFocus?: { current: TelescopeSegmentFocusState };
   /** レイヤー4で選択中の感情点。指定時は探索シーンを描画 */
   explorationPlotId?: string | null;
+  /** レイヤー4で選択中の区画 */
+  explorationSegmentIndex?: number | null;
   onSelectExplorationPlot?: (id: string) => void;
 }) {
   const region = useMemo(
@@ -2226,10 +2293,13 @@ function Layer3EmotionRegion({
         />
       ) : null}
 
-      {explorationPlotId && onSelectExplorationPlot ? (
+      {explorationPlotId &&
+      explorationSegmentIndex != null &&
+      onSelectExplorationPlot ? (
         <Layer4ExplorationLayer
           region={region}
           plots={regionPlots.map((plot) => plot.row)}
+          selectedSegmentIndex={explorationSegmentIndex}
           selectedPlotId={explorationPlotId}
           onSelectPlot={onSelectExplorationPlot}
         />
@@ -2265,6 +2335,8 @@ interface TelescopeGalaxyLayerProps {
   segmentFocus?: { current: TelescopeSegmentFocusState };
   /** レイヤー4で選択中の感情点 */
   explorationPlotId?: string | null;
+  /** レイヤー4で選択中の区画 */
+  explorationSegmentIndex?: number | null;
   onSelectExplorationPlot?: (id: string) => void;
 }
 
@@ -2280,6 +2352,7 @@ export function TelescopeGalaxyLayer({
   regionIndicator,
   segmentFocus,
   explorationPlotId = null,
+  explorationSegmentIndex = null,
   onSelectExplorationPlot,
 }: TelescopeGalaxyLayerProps) {
   const detailColors = useDetailColors();
@@ -2289,6 +2362,8 @@ export function TelescopeGalaxyLayer({
   const onFocusRef = useRef(onViewFocus);
   onFocusRef.current = onViewFocus;
   const focusedBarPartnerRef = useRef<BasicEmotionId | null>(null);
+  /** 花弁ハイライト対象の基本感情（レイヤー1=検知中、レイヤー2=バー方向の相手） */
+  const petalHighlightRef = useRef<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const relatedIds = useMemo(
@@ -2334,6 +2409,7 @@ export function TelescopeGalaxyLayer({
       zoomPhase === 'zooming-out';
 
     if (!inView) {
+      petalHighlightRef.current = null;
       if (lastKey.current !== '') {
         lastKey.current = '';
         setFocusedId(null);
@@ -2373,17 +2449,17 @@ export function TelescopeGalaxyLayer({
       }
       const nx = projected.current.x;
       const ny = projected.current.y;
-      const dist = Math.hypot(nx, ny);
+      const dist = ndcDistanceToAim(nx, ny);
       const hit: Hit = {
         id: node.id,
         label: node.label,
         color,
-        angle: Math.atan2(ny, nx),
+        angle: ndcAngleFromAim(nx, ny),
         dist,
         nx,
         ny,
       };
-      if (dist < HOLE_EDGE_NDC) {
+      if (dist < DETECT_RADIUS_NDC) {
         insideHits.push(hit);
       } else if (dist <= OUTSIDE_MAX_NDC) {
         outsideHits.push(hit);
@@ -2446,7 +2522,7 @@ export function TelescopeGalaxyLayer({
             id: dyad.id,
             label: dyad.label,
             color: detailColors.get(dyad.id) ?? dyadNode.color,
-            angle: Math.atan2(projected.current.y, projected.current.x),
+            angle: ndcAngleFromAim(projected.current.x, projected.current.y),
             nx: projected.current.x,
             ny: projected.current.y,
           };
@@ -2502,6 +2578,11 @@ export function TelescopeGalaxyLayer({
         };
       });
 
+    // レイヤー1は検知中の感情、レイヤー2はバー方向の相手の基本感情を花弁ハイライト
+    petalHighlightRef.current = inFocusView
+      ? focusedBarPartnerRef.current
+      : (nearest?.id ?? null);
+
     if (!nearest && nearby.length === 0) {
       if (lastKey.current !== '') {
         lastKey.current = '';
@@ -2523,7 +2604,9 @@ export function TelescopeGalaxyLayer({
 
   return (
     <group>
-      {!inRegionView ? <PlutchikPetalBackdrop /> : null}
+      {!inRegionView ? (
+        <PlutchikPetalBackdrop highlightRef={petalHighlightRef} />
+      ) : null}
       {inRegionView && selectedDyadId ? (
         <Layer3EmotionRegion
           selectedDyadId={selectedDyadId}
@@ -2537,6 +2620,7 @@ export function TelescopeGalaxyLayer({
               ? explorationPlotId
               : null
           }
+          explorationSegmentIndex={explorationSegmentIndex}
           onSelectExplorationPlot={onSelectExplorationPlot}
         />
       ) : null}

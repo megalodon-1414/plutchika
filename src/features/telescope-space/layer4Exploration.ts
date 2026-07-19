@@ -7,16 +7,16 @@ import {
 } from './layer3Region';
 import type { TelescopeFocusCameraPose } from './focusCameraView';
 
-/** レイヤー4: 選択点への近接カメラ距離 */
+/** レイヤー4/5: 選択セグメント俯瞰カメラ */
 export const TELESCOPE_EXPLORATION_VIEW = {
-  fov: 48,
+  fov: 72,
   moveMs: 720,
   /** 注視点からのカメラ後退量（面内法線方向） */
-  cameraBack: 0.55,
+  cameraBack: 0.72,
   /** 右寄りオフセット */
-  cameraSide: 0.22,
+  cameraSide: 0.28,
   /** 平面法線（Z）方向の高さ */
-  cameraHeight: 0.48,
+  cameraHeight: 0.62,
   /** 注視点まわりの視点回転（レイヤー3と同方向） */
   cameraYaw: 0.32,
   /** 近傍としてクリック可能な半径（統一空間） */
