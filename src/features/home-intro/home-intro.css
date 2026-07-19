@@ -15,6 +15,28 @@
   overscroll-behavior: none;
 }
 
+/*
+  ①ロゴ画面とその後の歩行シーンとのクロスフェード用ラッパー。
+  スクロールで切り替わる瞬間に片方が唐突に消えて片方が唐突に現れるのを防ぐため、
+  切り替え中は両方を一時的にマウントしたまま opacity を transition させ、
+  完全に透明になった側だけ transitionend でアンマウントする（HomeIntroView.tsx参照）。
+*/
+.home-intro-crossfade {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.45s ease;
+}
+
+.home-intro-crossfade--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.home-intro-crossfade--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ①ロゴ画面 */
 .home-intro-logo {
   position: absolute;
@@ -24,7 +46,8 @@
   align-items: center;
   justify-content: center;
   gap: 18px;
-  animation: home-intro-fade-in 0.6s ease both;
+  /* このロゴ画面だけはもとのフォント（サイト共通のTOT-雫花角丸ゴシックより前のフォント）に固定する。 */
+  font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', sans-serif;
 }
 
 .home-intro-logo__mark {
@@ -164,36 +187,13 @@
   animation: home-intro-walk-leg-right 0.45s steps(4) 2;
 }
 
-/* 進捗・スキップ */
-.home-intro-progress {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 20px;
-  z-index: 3;
-  pointer-events: none;
-}
-
-.home-intro-progress__skip {
-  pointer-events: auto;
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
-  color: #f4ecf7;
-  text-decoration: none;
-  text-shadow: 0 1px 6px rgba(5, 7, 15, 0.85);
-}
-
 /* 深掘りルート上部に常設する「必須ルートに戻る」リンク */
 .home-intro-back-link {
   position: absolute;
   top: 16px;
   left: 20px;
   z-index: 3;
-  font-size: 0.75rem;
+  font-size: 1rem;
   letter-spacing: 0.06em;
   color: #f4ecf7;
   text-decoration: none;
@@ -355,12 +355,13 @@
   right: 24px;
   top: 50%;
   transform: translateY(-50%);
-  width: 140px;
-  height: 220px;
+  /* 全体を1.3倍（140x220 → 182x286）。フォント・円・線の長さなど内側の数値もすべて1.3倍で揃えてある。 */
+  width: 182px;
+  height: 286px;
   z-index: 4;
   pointer-events: none;
   /* 縦線と全ドットの中心位置（右端からのオフセット）。ドット・PREVIOUSの円弧はすべてこの値を基準に「中心」を揃える。 */
-  --nav-indicator-axis: 10px;
+  --nav-indicator-axis: 13px;
 }
 
 .nav-indicator__line {
@@ -368,7 +369,7 @@
   right: var(--nav-indicator-axis);
   top: 0;
   bottom: 0;
-  width: 1px;
+  width: 1.3px;
   background: linear-gradient(
     to bottom,
     rgba(150, 230, 170, 0.12),
@@ -385,17 +386,17 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 16px;
   background: none;
   border: none;
-  padding: 6px 0;
+  padding: 8px 0;
   margin: 0;
   cursor: pointer;
   pointer-events: auto;
 }
 
 .nav-indicator__label {
-  font-size: 0.68rem;
+  font-size: 0.88rem;
   letter-spacing: 0.06em;
   color: rgba(190, 230, 200, 0.5);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
@@ -406,24 +407,24 @@
 }
 
 /*
-  ドットの実サイズ（非アクティブ10px／アクティブ16px）が変わっても、
+  ドットの実サイズ（非アクティブ13px／アクティブ21px）が変わっても、
   この固定サイズの「トラック」の中心でflexboxが常に中央寄せするため、
   ドット自体の中心は縦線の中心（--nav-indicator-axis）から常にズレない。
 */
 .nav-indicator__dot-track {
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .nav-indicator__dot {
-  width: 10px;
-  height: 10px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
-  border: 1px solid rgba(170, 220, 180, 0.55);
+  border: 1.3px solid rgba(170, 220, 180, 0.55);
   background: transparent;
   transition: all 0.2s ease;
 }
@@ -444,8 +445,8 @@
 }
 
 .nav-indicator__stage--current .nav-indicator__dot {
-  width: 16px;
-  height: 16px;
+  width: 21px;
+  height: 21px;
   background: #eaffea;
   border-color: #ffffff;
   animation: nav-indicator-pulse 2.2s ease-in-out infinite;
@@ -453,10 +454,10 @@
 
 @keyframes nav-indicator-pulse {
   0%, 100% {
-    box-shadow: 0 0 6px 2px rgba(180, 255, 190, 0.55);
+    box-shadow: 0 0 8px 3px rgba(180, 255, 190, 0.55);
   }
   50% {
-    box-shadow: 0 0 16px 6px rgba(180, 255, 190, 0.9);
+    box-shadow: 0 0 21px 8px rgba(180, 255, 190, 0.9);
   }
 }
 
@@ -477,7 +478,7 @@
 .nav-indicator__previous-ring {
   fill: none;
   stroke: rgba(170, 220, 180, 0.35);
-  stroke-width: 1;
+  stroke-width: 1.3;
 }
 
 .nav-indicator__previous-spin {
@@ -487,7 +488,7 @@
 }
 
 .nav-indicator__previous-text {
-  font-size: 6.5px;
+  font-size: 8.45px;
   fill: rgba(180, 235, 190, 0.6);
   letter-spacing: 0.5px;
 }
@@ -504,5 +505,58 @@
 @media (max-width: 640px) {
   .nav-indicator {
     display: none;
+  }
+}
+
+/*
+  深掘りルートpanel-3：2輪の花で選んだ組み合わせ感情を示すバッジ。
+  角を丸めた四角の背景（感情の色）の上に白抜き文字を中央配置し、
+  出現時に一瞬拡大してから、感情色でグローし続ける。
+*/
+.dual-wheel-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.4em;
+  border-radius: 0.32em;
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: center;
+  transition:
+    opacity 0.3s ease,
+    background-color 0.3s ease;
+}
+
+.dual-wheel-badge--active {
+  padding: 0.35em 0.85em;
+  animation:
+    dual-wheel-badge-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both,
+    dual-wheel-badge-glow 2.2s ease-in-out 0.5s infinite;
+}
+
+@keyframes dual-wheel-badge-pop {
+  0% {
+    transform: scale(0.55);
+  }
+  55% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes dual-wheel-badge-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px 0 var(--dual-wheel-glow-color, transparent),
+      0 0 20px 4px var(--dual-wheel-glow-color, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 22px 2px var(--dual-wheel-glow-color, transparent),
+      0 0 40px 10px var(--dual-wheel-glow-color, transparent);
   }
 }

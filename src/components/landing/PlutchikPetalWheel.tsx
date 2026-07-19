@@ -81,7 +81,7 @@ export function PlutchikPetalWheel({
               stroke-opacity 0.35s ease;
           }
           .plutchik-petal-wheel__petal--selected {
-            transform: scale(1.14);
+            transform: scale(1.08);
             animation: plutchik-petal-wheel-glow 2.2s ease-in-out infinite;
           }
         `}
@@ -89,9 +89,10 @@ export function PlutchikPetalWheel({
       {showLabel && (
         <div
           style={{
-            fontSize: '1.05em',
+            fontSize: '2.1em',
             fontWeight: 600,
             letterSpacing: '0.06em',
+            whiteSpace: 'nowrap',
             color: selected ? selected.color : DEFAULT_PROMPT_COLOR,
             transition: 'color 0.3s ease',
           }}
