@@ -16,6 +16,7 @@
 import { useRef } from 'react';
 import type { PlanetPanelContent } from '../panelContent';
 import { getRotationPerStep } from '../planetRotation';
+import { HOME_INTRO_HORIZON_RATIO } from '../sceneLayout';
 import { PlanetGlobe } from './PlanetGlobe';
 
 const STAR_COUNT = 60;
@@ -29,6 +30,13 @@ const STAR_PROGRESS_PER_STEP = 0.03;
 
 /** 中心からの最大距離（vmax）。画面端・角より十分外まで伸ばし、ループの継ぎ目を画面外に隠す。 */
 const STAR_MAX_DISTANCE_VMAX = 85;
+
+/**
+ * 星の消失点（原点）を画面中央ではなく、人物の立ち位置（惑星の頂点＝地平線）に揃える。
+ * home-intro.css の `--intro-horizon` と同じ値（HOME_INTRO_HORIZON_RATIO）を使うことで、
+ * 消失点そのものが人物・地面のシルエットに隠れて見えなくなる（＝奥から生まれた星の発生源が見えない）。
+ */
+const STAR_ORIGIN_TOP_PERCENT = HOME_INTRO_HORIZON_RATIO * 100;
 const STAR_SIZE_MIN = 2.4;
 const STAR_SIZE_MAX = 12.8;
 
@@ -87,7 +95,7 @@ export function WalkScene({ stepIndex, panelContents, snapToInitialStep, onNavig
       const size = STAR_SIZE_MIN + progress * (STAR_SIZE_MAX - STAR_SIZE_MIN);
 
       dot.style.left = `calc(50% + ${x}vmax)`;
-      dot.style.top = `calc(50% + ${y}vmax)`;
+      dot.style.top = `calc(${STAR_ORIGIN_TOP_PERCENT}% + ${y}vmax)`;
       dot.style.width = `${size}px`;
       dot.style.height = `${size}px`;
     });
