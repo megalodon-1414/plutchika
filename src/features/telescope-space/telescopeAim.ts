@@ -98,7 +98,6 @@ export function ndcDistanceToSegment(
 }
 
 const _aimNdc = new THREE.Vector3();
-const _aimWorld = new THREE.Vector3();
 
 /**
  * 照準を通るワールド空間のレイを書く。

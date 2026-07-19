@@ -1021,7 +1021,7 @@ function TelescopeCameraController({
     };
   }, [gl]);
 
-  useFrame(({ clock }, delta) => {
+  useFrame((_state, delta) => {
     if (!(camera instanceof THREE.PerspectiveCamera)) {
       return;
     }
