@@ -1,9 +1,9 @@
-import type { SimplePanelContent } from '../home-intro/panelContent';
+import type { PlanetPanelContent } from '../home-intro/panelContent';
 
 export interface DeepDivePanelDefinition {
   /** アンカーID（panel-1〜panel-5）。必須ルート側からのリンク先指定に使う。 */
   id: string;
-  content: SimplePanelContent;
+  content: PlanetPanelContent;
 }
 
 /**
@@ -32,7 +32,7 @@ export const DEEP_DIVE_PANELS: DeepDivePanelDefinition[] = [
   {
     id: 'panel-3',
     content: {
-      layout: 'simple',
+      layout: 'dual-wheel',
       hook: 'プルチックによる感情の8個の分類と24個の分類',
       heading: 'プルチック環',
       body: '心理学者ロバート・プルチックは、喜び・信頼・恐れ・驚き・悲しみ・嫌悪・怒り・期待という8つを、生存に関わる基本的な反応として位置づけました。\n色相環のように、隣り合う感情ほど似ていて、正反対の位置にある感情ほど相容れない性質を持つように配置されています。\nさらにプルチックは、隣り合う感情同士が混ざり合うことで生まれる「応用感情」も理論化しました。\nたとえば「期待」と「喜び」が混ざると「楽観」に、「信頼」と「恐れ」が混ざると「服従」になる、というように。\nこの応用感情はさらに段階を重ね、最終的に8×3＝24種類にまで整理されています。\nPLUTCHIKAの感情環は、この8つの基本感情と24の応用感情、両方の理論を土台にしています。',
