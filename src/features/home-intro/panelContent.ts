@@ -45,7 +45,23 @@ export interface SimplePanelContent {
   mirrored?: boolean;
 }
 
-export type PlanetPanelContent = WelcomePanelContent | SplitGraphicPanelContent | SimplePanelContent;
+/**
+ * 深掘りルートpanel-3専用。見出し・本文を左、8感情の花を2輪（左右）並べたインタラクティブ
+ * グラフィックを右に配置する。2輪それぞれから花びらを1枚ずつ選ぶと、2輪の下・中央に
+ * 組み合わせ感情（32感情対応表）が表示される（plutchika-panel3-32emotions-instructions.md 準拠）。
+ */
+export interface DualWheelPanelContent {
+  layout: 'dual-wheel';
+  hook: string;
+  heading: string;
+  body: string;
+}
+
+export type PlanetPanelContent =
+  | WelcomePanelContent
+  | SplitGraphicPanelContent
+  | SimplePanelContent
+  | DualWheelPanelContent;
 
 interface StepLike {
   content?: PlanetPanelContent;

@@ -2,6 +2,8 @@ import { useMemo, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ROUTES } from '../../routes/paths';
 import { IntroWalker } from '../home-intro/components/IntroWalker';
+import { NavigationIndicator } from '../home-intro/components/NavigationIndicator';
+import type { NavigationIndicatorStage } from '../home-intro/components/NavigationIndicator';
 import { WalkScene } from '../home-intro/components/WalkScene';
 import '../home-intro/home-intro.css';
 import { buildPanelContents } from '../home-intro/panelContent';
@@ -11,6 +13,11 @@ import { DEEP_DIVE_PANELS } from './panels';
 // PlanetMesh の「あるステップが読める位置に運ぶパネル番号は (stepIndex + 1) % panelCount」という
 // 仕組みに合わせて対応付ける（home-introと共通のヘルパー。panelCountが違っても同じ式で成立する）。
 const PANEL_CONTENTS = buildPanelContents(DEEP_DIVE_PANELS, DEEP_DIVE_PANELS.length);
+
+/** 現在地インジケーター用のラベル。各パネルの見出しをそのまま使う（5パネル＝5ドット）。 */
+const NAV_INDICATOR_STAGES: NavigationIndicatorStage[] = DEEP_DIVE_PANELS.map((panel) => ({
+  label: panel.content.heading,
+}));
 
 /** URLの `?panel=1`〜`5`（または `panel-1` 等のID）から復元する初期パネルのインデックス。 */
 function resolveInitialIndex(panelParam: string | null): number {
@@ -37,7 +44,7 @@ export function DeepDiveView() {
   const fromStepId = searchParams.get('from');
   const backHref = fromStepId ? `${ROUTES.home}?step=${fromStepId}` : ROUTES.home;
 
-  const { activeIndex, isAnimating } = useStepGesture(
+  const { activeIndex, isAnimating, goTo } = useStepGesture(
     DEEP_DIVE_PANELS.length,
     containerRef,
     initialIndex,
@@ -46,7 +53,7 @@ export function DeepDiveView() {
   return (
     <div ref={containerRef} className="home-intro-root">
       <Link to={backHref} className="home-intro-back-link">
-        ← 必須ルートに戻る
+        ← 言葉の旅を続ける
       </Link>
 
       <WalkScene
@@ -55,12 +62,7 @@ export function DeepDiveView() {
         snapToInitialStep={initialIndex !== 0}
       />
       <IntroWalker stepping={isAnimating} />
-
-      <div className="home-intro-progress">
-        <span className="home-intro-progress__counter">
-          {String(activeIndex + 1).padStart(2, '0')} / {String(DEEP_DIVE_PANELS.length).padStart(2, '0')}
-        </span>
-      </div>
+      <NavigationIndicator stages={NAV_INDICATOR_STAGES} currentIndex={activeIndex} onSelect={goTo} />
     </div>
   );
 }

@@ -12,6 +12,8 @@ export interface UseStepGestureResult {
   isAnimating: boolean;
   goNext: () => void;
   goPrev: () => void;
+  /** 任意のステップへ直接ジャンプする（現在地インジケーターのドットクリックなど向け）。 */
+  goTo: (index: number) => void;
 }
 
 /**
@@ -55,6 +57,24 @@ export function useStepGesture(
 
   const goNext = useCallback(() => step(1), [step]);
   const goPrev = useCallback(() => step(-1), [step]);
+
+  const goTo = useCallback(
+    (index: number) => {
+      if (lockedRef.current || index < 0 || index >= stepCount || index === activeIndexRef.current) {
+        return;
+      }
+      lockedRef.current = true;
+      activeIndexRef.current = index;
+      setActiveIndex(index);
+      setIsAnimating(true);
+
+      lockTimerRef.current = window.setTimeout(() => {
+        lockedRef.current = false;
+        setIsAnimating(false);
+      }, GESTURE_LOCK_MS);
+    },
+    [stepCount],
+  );
 
   useEffect(() => {
     const element = containerRef.current;
@@ -125,5 +145,5 @@ export function useStepGesture(
     [],
   );
 
-  return { activeIndex, isAnimating, goNext, goPrev };
+  return { activeIndex, isAnimating, goNext, goPrev, goTo };
 }
