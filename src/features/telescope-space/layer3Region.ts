@@ -10,6 +10,8 @@ import type { TelescopeFocusCameraPose } from './focusCameraView';
 export const TELESCOPE_REGION_VIEW = {
   fov: 56,
   moveMs: 760,
+  /** 入場後、基本感情（progress=1）から24感情（0.5）へスライドする時間 */
+  slideToMidMs: 640,
   /** バー（水平線）から手前側（面内法線方向）への引き量 */
   cameraBack: 1.35,
   /** バー進行方向（画面右側）へのオフセット＝右寄りから眺める */

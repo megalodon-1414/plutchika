@@ -182,6 +182,62 @@ function setEmotionOrbitPosition(
   );
 }
 
+/** レイヤー1: 8感情同士（対立ペア以外）を結ぶ細く薄い白線 */
+const BASIC_WEB_LINE_OPACITY = 0.09;
+const BASIC_WEB_LINE_Z = -0.1;
+
+function BasicEmotionWebLines({ visible }: { visible: boolean }) {
+  const geometry = useMemo(() => {
+    const positionById = new Map(
+      TELESCOPE_GALAXY_NODES.map((node) => [node.id, node.position]),
+    );
+    const positions: number[] = [];
+    // 24合成感情＝対立以外の全ペア。その成分同士を結ぶ。
+    for (const dyad of DYAD_EMOTIONS) {
+      const a = positionById.get(dyad.components[0]);
+      const b = positionById.get(dyad.components[1]);
+      if (!a || !b) {
+        continue;
+      }
+      positions.push(
+        a[0],
+        a[1],
+        BASIC_WEB_LINE_Z,
+        b[0],
+        b[1],
+        BASIC_WEB_LINE_Z,
+      );
+    }
+    const result = new THREE.BufferGeometry();
+    result.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
+    return result;
+  }, []);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  return (
+    <lineSegments
+      geometry={geometry}
+      visible={visible}
+      frustumCulled={false}
+      renderOrder={-1}
+    >
+      <lineBasicMaterial
+        color="#ffffff"
+        transparent
+        opacity={BASIC_WEB_LINE_OPACITY}
+        depthWrite={false}
+        depthTest
+        blending={THREE.AdditiveBlending}
+        toneMapped={false}
+      />
+    </lineSegments>
+  );
+}
+
 function BasicEmotionOrbits({ visible }: { visible: boolean }) {
   const orbitersRef = useRef<THREE.InstancedMesh>(null);
   const trailRef = useRef<THREE.Points>(null);
@@ -844,6 +900,118 @@ function Layer2EmotionFloorMarkers({
                 toneMapped={false}
               />
             </mesh>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+/** プルチック環の花弁背景 — ここを触って調整する */
+const PETAL_BACKDROP = {
+  /** 花弁面の Z（各種床要素より奥） */
+  z: -0.3,
+  /** 花弁の根本半径 */
+  inner: 0.2,
+  /** 花弁の先端半径（環半径比） */
+  outerScale: 1.28,
+  /** 花弁の幅（1 = 8等分セクターいっぱい） */
+  widthRatio: 0.68,
+  /** 塗りの不透明度（加算合成） */
+  fillOpacity: 0.085,
+  /** 輪郭線の不透明度（加算合成） */
+  strokeOpacity: 0.16,
+  /** 意匠全体の縮尺 */
+  scale: 0.8,
+} as const;
+
+/**
+ * 全レイヤー共通の背景意匠。8基本感情の方向に、感情色の花弁を
+ * プルチックの環のように敷く。加算合成＋長手グラデーションで控えめに光らせる。
+ */
+function PlutchikPetalBackdrop() {
+  const { fillGeometry, strokeGeometry } = useMemo(() => {
+    const inner = PETAL_BACKDROP.inner;
+    const outer = TELESCOPE_GALAXY_RADIUS * PETAL_BACKDROP.outerScale;
+    const mid = (inner + outer) * 0.5;
+    const halfWidth =
+      Math.tan(Math.PI / 8) * mid * PETAL_BACKDROP.widthRatio;
+
+    const shape = new THREE.Shape();
+    shape.moveTo(inner, 0);
+    shape.quadraticCurveTo(mid, halfWidth, outer, 0);
+    shape.quadraticCurveTo(mid, -halfWidth, inner, 0);
+    shape.closePath();
+
+    const fill = new THREE.ShapeGeometry(shape, 28);
+    // 長手方向のグラデーション（中腹が最も明るく、根本と先端で消える）。
+    // 白のグラデーションを頂点色に焼き、材質色（感情色）と乗算して共有する。
+    const positionAttribute = fill.getAttribute('position');
+    const colors = new Float32Array(positionAttribute.count * 3);
+    for (let index = 0; index < positionAttribute.count; index++) {
+      const t = THREE.MathUtils.clamp(
+        (positionAttribute.getX(index) - inner) / (outer - inner),
+        0,
+        1,
+      );
+      const intensity = Math.sin(Math.PI * t) ** 1.4;
+      colors[index * 3] = intensity;
+      colors[index * 3 + 1] = intensity;
+      colors[index * 3 + 2] = intensity;
+    }
+    fill.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const stroke = new THREE.BufferGeometry().setFromPoints(
+      shape.getPoints(40),
+    );
+    return { fillGeometry: fill, strokeGeometry: stroke };
+  }, []);
+
+  useEffect(
+    () => () => {
+      fillGeometry.dispose();
+      strokeGeometry.dispose();
+    },
+    [fillGeometry, strokeGeometry],
+  );
+
+  return (
+    <group
+      renderOrder={-2}
+      scale={[PETAL_BACKDROP.scale, PETAL_BACKDROP.scale, 1]}
+    >
+      {TELESCOPE_GALAXY_NODES.map((node) => {
+        const angle = Math.atan2(node.position[1], node.position[0]);
+        return (
+          <group
+            key={`petal-${node.id}`}
+            position={[0, 0, PETAL_BACKDROP.z]}
+            rotation={[0, 0, angle]}
+          >
+            <mesh geometry={fillGeometry} frustumCulled={false}>
+              <meshBasicMaterial
+                color={node.color}
+                vertexColors
+                transparent
+                opacity={PETAL_BACKDROP.fillOpacity}
+                depthWrite={false}
+                depthTest
+                blending={THREE.AdditiveBlending}
+                side={THREE.DoubleSide}
+                toneMapped={false}
+              />
+            </mesh>
+            <lineLoop geometry={strokeGeometry} frustumCulled={false}>
+              <lineBasicMaterial
+                color={node.color}
+                transparent
+                opacity={PETAL_BACKDROP.strokeOpacity}
+                depthWrite={false}
+                depthTest
+                blending={THREE.AdditiveBlending}
+                toneMapped={false}
+              />
+            </lineLoop>
           </group>
         );
       })}
@@ -2084,6 +2252,8 @@ interface TelescopeGalaxyLayerProps {
   detailVisibility: number;
   /** Layer2 シーン（関連感情の強調表示）が有効か */
   layer2SceneActive?: boolean;
+  /** Layer2 へのカメラ到着済み（バー登場アニメーション開始トリガー） */
+  layer2Arrived?: boolean;
   /** 3段階目の中心感情（ロック）— 配置は変えず、強調と検知対象に使う */
   focusBasicId: BasicEmotionId | null;
   selectedDyadId: EmotionId | null;
@@ -2102,6 +2272,7 @@ export function TelescopeGalaxyLayer({
   zoomPhase,
   detailVisibility,
   layer2SceneActive = false,
+  layer2Arrived = false,
   focusBasicId,
   selectedDyadId,
   wordPlots,
@@ -2352,6 +2523,7 @@ export function TelescopeGalaxyLayer({
 
   return (
     <group>
+      {!inRegionView ? <PlutchikPetalBackdrop /> : null}
       {inRegionView && selectedDyadId ? (
         <Layer3EmotionRegion
           selectedDyadId={selectedDyadId}
@@ -2378,6 +2550,14 @@ export function TelescopeGalaxyLayer({
             !inFocusView)
         }
       />
+      <BasicEmotionWebLines
+        visible={
+          zoomPhase === 'approaching' ||
+          zoomPhase === 'wide' ||
+          ((zoomPhase === 'zooming-in' || zoomPhase === 'zooming-out') &&
+            !inFocusView)
+        }
+      />
       {inFocusView && focusBasicId ? (
         <>
           <Layer2RadialGrid />
@@ -2387,7 +2567,7 @@ export function TelescopeGalaxyLayer({
           />
           <RelatedEmotionBars
             focusBasicId={focusBasicId}
-            visible={zoomPhase === 'detail'}
+            visible={zoomPhase === 'detail' || layer2Arrived}
             onFocusedPartnerChange={(partnerId) => {
               focusedBarPartnerRef.current = partnerId;
             }}
@@ -2449,7 +2629,7 @@ export function TelescopeGalaxyLayer({
                 radius={TELESCOPE_DYAD_SPHERE_RADIUS}
                 color={detailColors.get(node.id) ?? node.color}
                 opacity={opacity}
-                emissiveBoost={related ? 0.55 : 0.4}
+                emissiveBoost={related ? 0.7 : 0.5}
                 focused={focusedId === node.id}
                 pointCloud
                 pointCount={52}
