@@ -1,33 +1,16 @@
+import { ROUTES } from '../../routes/paths';
+import type { PlanetPanelContent } from './panelContent';
+
 export type HomeIntroStepKind = 'logo' | 'walk';
-
-/** ようこそパネル用。フック・見出し・サブコピーは左揃え、本文は右揃え。 */
-export interface WelcomePanelContent {
-  layout: 'welcome';
-  hook: string;
-  heading: string;
-  subcopy: string;
-  body: string;
-}
-
-/** プルチック環パネル用。テキストを左、グラフィックを右に配置する左右分割レイアウト。 */
-export interface SplitGraphicPanelContent {
-  layout: 'split-graphic';
-  hook: string;
-  heading: string;
-  body: string;
-  graphic: 'plutchik-wheel';
-}
-
-export type HomeIntroPanelContent = WelcomePanelContent | SplitGraphicPanelContent;
 
 export interface HomeIntroStepDefinition {
   id: string;
   kind: HomeIntroStepKind;
-  content?: HomeIntroPanelContent;
+  content?: PlanetPanelContent;
 }
 
 /**
- * ①〜③のコピー。④搭乗演出はまだ未実装（このスクロールの先に予定）。
+ * ①〜③のコピー。④搭乗はステップの枠だけ用意した仮画面（content未定、UIは後日実装）。
  * 「やばい」は前面に出さず、もやもや全般への共感を主題にする。
  */
 export const HOME_INTRO_STEPS: HomeIntroStepDefinition[] = [
@@ -43,7 +26,15 @@ export const HOME_INTRO_STEPS: HomeIntroStepDefinition[] = [
       hook: '心のもやもやにピッタリなことばを、みつける場所です。',
       heading: 'PLUTCHIKA(ぷるちか)へようこそ',
       subcopy: 'WELCOME TO THE ぷるちか',
-      body: '私たちは毎日、たくさんの感情の中で生きています。「なんだか心が落ち着かない」「うれしいけれど、どこか寂しい」……。そんな風に、自分の気持ちをうまく言葉にできず、モヤモヤした経験はありませんか？　心理学では、自分の感情にぴったりな「名前」をつけてあげるだけで、脳のストレスが和らぎ、心がすっと整うことが分かっています。「Plutchika(ぷるちか)」は、あなたの「心の現在地」を定義するためのwebサイトです。',
+      body: [
+        {
+          text: '私たちは毎日、たくさんの感情の中で生きています。「なんだか心が落ち着かない」「うれしいけれど、どこか寂しい」……。そんな風に、自分の気持ちをうまく言葉にできず、モヤモヤした経験はありませんか？　',
+        },
+        { text: '心理学', linkTo: `${ROUTES.deepDive}?panel=1&from=welcome` },
+        {
+          text: 'では、自分の感情にぴったりな「名前」をつけてあげるだけで、脳のストレスが和らぎ、心がすっと整うことが分かっています。「Plutchika(ぷるちか)」は、あなたの「心の現在地」を定義するためのwebサイトです。',
+        },
+      ],
     },
   },
   {
@@ -53,8 +44,23 @@ export const HOME_INTRO_STEPS: HomeIntroStepDefinition[] = [
       layout: 'split-graphic',
       hook: '感情の語彙をマッピングしました。',
       heading: 'プルチックの感情環とは',
-      body: '心理学者プルチックは、8つの基本感情に色と位置を与え、感情を1枚の地図として表しました。PLUTCHIKAは、この感情環をもとに、感情を表す言葉ひとつひとつに位置を与え、マッピングしています。気になる花びらに、触れてみてください。',
+      body: [
+        { text: '心理学者プルチックが考案した「' },
+        { text: 'プルチック環', linkTo: `${ROUTES.deepDive}?panel=3&from=emotion-wheel` },
+        {
+          text: '」は、8つの基本感情に色と位置を与え、感情をひとつの地図として表したものです。PLUTCHIKAは、このプルチック環をもとに、感情を表す言葉をひとつひとつ段階に分けて位置づけ、マッピングしました。大きな感情から、少しずつニュアンスの違う言葉へ——地図の上を「',
+        },
+        { text: '探索', linkTo: `${ROUTES.deepDive}?panel=4&from=emotion-wheel` },
+        {
+          text: 'するように辿っていくと、今のあなたにぴったりな一語が見つかるはずです。さあ、その言葉を探しに行きましょう。',
+        },
+      ],
       graphic: 'plutchik-wheel',
     },
+  },
+  {
+    id: 'boarding',
+    kind: 'walk',
+    // content未定：搭乗演出のUI・コピーは後日実装。歩行・回転の枠だけ先に用意している。
   },
 ];

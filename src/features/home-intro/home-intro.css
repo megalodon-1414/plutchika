@@ -169,6 +169,19 @@
   text-shadow: 0 1px 6px rgba(5, 7, 15, 0.85);
 }
 
+/* 深掘りルート上部に常設する「必須ルートに戻る」リンク */
+.home-intro-back-link {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  z-index: 3;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: #f4ecf7;
+  text-decoration: none;
+  text-shadow: 0 1px 6px rgba(5, 7, 15, 0.85);
+}
+
 @keyframes home-intro-fade-in {
   from {
     opacity: 0;

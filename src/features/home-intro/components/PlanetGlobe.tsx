@@ -4,9 +4,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { PlutchikPetalWheel } from '../../../components/landing/PlutchikPetalWheel';
+import type {
+  BodyTextSegment,
+  PlanetPanelContent,
+  SimplePanelContent,
+  SplitGraphicPanelContent,
+  WelcomePanelContent,
+} from '../panelContent';
+import { getRotationPerStep } from '../planetRotation';
 import { HOME_INTRO_HORIZON_RATIO } from '../sceneLayout';
-import { HOME_INTRO_STEPS } from '../steps';
-import type { HomeIntroPanelContent, SplitGraphicPanelContent, WelcomePanelContent } from '../steps';
 
 /** 角度を [-π, π] に正規化する */
 function normalizeAngle(angle: number): number {
@@ -20,47 +26,7 @@ function normalizeAngle(angle: number): number {
   return result;
 }
 
-/** 球に取り付けるテキストパネルの枚数。回転軸に沿った円周上に等間隔で配置する。 */
-const PANEL_COUNT = 4;
-const PANEL_ANGLE_STEP = (Math.PI * 2) / PANEL_COUNT;
-
-/**
- * 各パネルスロットに表示するコンテンツを、HOME_INTRO_STEPS の実際のコピーから自動で対応付ける。
- *
- * stepIndex が1進むごとに共有回転角が PANEL_ANGLE_STEP ぶん増えるため、
- * あるステップが「読める位置」に運ぶパネルの番号は (stepIndex + 1) % PANEL_COUNT で決まる
- * （BASE_TILT_X と PANEL_ANGLE_STEP が等しいため。three.js の行列で数値検証済み）。
- * 対応する本番ステップがまだ無いスロットは null のまま
- * （現状のステップ数ではその角度に到達しないため、実際には表示されない）。
- */
-const PANEL_CONTENTS: (HomeIntroPanelContent | null)[] = (() => {
-  const slots: (HomeIntroPanelContent | null)[] = Array.from({ length: PANEL_COUNT }, () => null);
-  HOME_INTRO_STEPS.forEach((step, stepIndex) => {
-    if (step.kind === 'walk' && step.content) {
-      const panelIndex = (stepIndex + 1) % PANEL_COUNT;
-      slots[panelIndex] = step.content;
-    }
-  });
-  return slots;
-})();
-
-/**
- * 1ステップぶんの自転角（ラジアン）。歩幅の実感を作る担当。
- * ワールドX軸（水平・pitch）まわりに正方向へ回すと、奥側の面が手前（カメラ側）へ流れ、
- * そのまま下側（裏＝見えない側）へ回り込む「前方へ転がる」動きになる（three.jsの行列で数値検証済み）。
- * これにより、人物は静止したまま「画面の奥（遠く）へ歩いているように見える」錯覚を作る。
- *
- * パネルの間隔（PANEL_ANGLE_STEP）とちょうど一致させ、1ステップ＝次のパネルが1枚分だけ回ってくるようにする。
- */
-export const ROTATION_PER_STEP = PANEL_ANGLE_STEP;
 const ROTATION_LERP_SPEED = 4;
-
-/**
- * 画面に見えている頂点（人物の足元）は、SphereGeometryの既定UVでは「極」にあたり、経線が1点に収束して歪む。
- * 固定のX軸90度オフセットで、開始姿勢の見える頂点を歪みの少ない「赤道」付近にずらす。
- * ただし歩行の回転も同じX軸まわりなので、ステップを重ねるとやがて緯度が変わり極に近づく（③④⑤追加時に要調整）。
- */
-const BASE_TILT_X = Math.PI / 2;
 
 const PLANET_BASE_COLOR = '#c3cbef';
 const CRATER_COLOR = 'rgba(64, 68, 116, 0.4)';
@@ -100,12 +66,14 @@ function createPlanetTexture(): THREE.CanvasTexture {
 interface TextPanelProps {
   radius: number;
   angle: number;
-  content: HomeIntroPanelContent | null;
+  content: PlanetPanelContent | null;
   /** 「空」（頂点から画面上端まで）の幅・高さ。テキストはこの範囲内にだけ収める。 */
   skyWidth: number;
   skyHeight: number;
   /** 球と回転を共有する親グループへの参照。位置・向きはここから一切動かさず、表示の濃さだけをこの回転から導出する。 */
   rotatingGroupRef: RefObject<THREE.Group | null>;
+  /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
+  onNavigate?: (path: string) => void;
 }
 
 /** この角度差を超えたら完全に不可視（cos(diff) がこの値未満） */
@@ -117,14 +85,119 @@ interface PanelLayoutProps {
   skyWidth: number;
   skyHeight: number;
   opacity: number;
+  /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
+  onNavigate?: (path: string) => void;
 }
 
-/** ①ようこそパネル用。フック・見出し・サブコピーは左揃え、本文は右揃え。 */
+/**
+ * CJK主体のテキストを前提に、maxWidth（px相当）とfontSizeから折り返し行数を概算する。
+ * troika-three-textは実際の折り返し位置を同期的に取得できないため、あくまで目安。
+ * 「仮」コピー段階の縦位置合わせとしては十分な精度で、最終コピー確定時に見た目を調整する前提。
+ */
+function estimateSegmentLines(text: string, maxWidth: number, fontSize: number): number {
+  const charsPerLine = Math.max(1, Math.floor(maxWidth / fontSize));
+  return Math.max(1, Math.ceil(text.length / charsPerLine));
+}
+
+interface LinkedBodyTextProps {
+  segments: BodyTextSegment[];
+  x: number;
+  startY: number;
+  maxWidth: number;
+  fontSize: number;
+  lineHeight: number;
+  color: string;
+  linkColor: string;
+  anchorX: 'left' | 'right' | 'center';
+  textAlign: 'left' | 'right' | 'center';
+  opacity: number;
+  onNavigate?: (path: string) => void;
+}
+
+/**
+ * 本文の断片配列を、上から順に行として積み上げて描画する。
+ * 3Dテキスト（troika-three-text）は1メッシュ＝1スタイルで、HTMLの<a>のように文中の
+ * 一部だけを別スタイル＋クリック可能にする機能がないため、linkTo を持つ断片は
+ * 「その断片だけの行」として分割し、別の色・クリックハンドラを与える。
+ */
+function LinkedBodyText({
+  segments,
+  x,
+  startY,
+  maxWidth,
+  fontSize,
+  lineHeight,
+  color,
+  linkColor,
+  anchorX,
+  textAlign,
+  opacity,
+  onNavigate,
+}: LinkedBodyTextProps) {
+  const segmentYs: number[] = [];
+  segments.reduce((cursorY, segment) => {
+    segmentYs.push(cursorY);
+    return cursorY - estimateSegmentLines(segment.text, maxWidth, fontSize) * fontSize * lineHeight;
+  }, startY);
+
+  return (
+    <>
+      {segments.map((segment, index) => {
+        const y = segmentYs[index];
+        const isLink = Boolean(segment.linkTo);
+        return (
+          <Text
+            key={index}
+            position={[x, y, 0]}
+            fontSize={fontSize}
+            lineHeight={lineHeight}
+            color={isLink ? linkColor : color}
+            anchorX={anchorX}
+            anchorY="top"
+            maxWidth={maxWidth}
+            textAlign={textAlign}
+            overflowWrap="break-word"
+            fillOpacity={opacity}
+            sdfGlyphSize={256}
+            onClick={
+              isLink
+                ? (event) => {
+                    event.stopPropagation();
+                    onNavigate?.(segment.linkTo as string);
+                  }
+                : undefined
+            }
+            onPointerOver={
+              isLink
+                ? (event) => {
+                    event.stopPropagation();
+                    document.body.style.cursor = 'pointer';
+                  }
+                : undefined
+            }
+            onPointerOut={
+              isLink
+                ? () => {
+                    document.body.style.cursor = 'auto';
+                  }
+                : undefined
+            }
+          >
+            {segment.text}
+          </Text>
+        );
+      })}
+    </>
+  );
+}
+
+/** ようこそパネル用。フック・見出し・サブコピーは左揃え、本文は右揃え。 */
 function WelcomePanelLayout({
   content,
   skyWidth,
   skyHeight,
   opacity,
+  onNavigate,
 }: PanelLayoutProps & { content: WelcomePanelContent }) {
   const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.5;
@@ -176,33 +249,33 @@ function WelcomePanelLayout({
       >
         {content.subcopy}
       </Text>
-      <Text
-        position={[rightX, skyHeight * 0.42, 0]}
+      <LinkedBodyText
+        segments={content.body}
+        x={rightX}
+        startY={skyHeight * 0.42}
+        maxWidth={rightWidth}
         fontSize={skyHeight * 0.024}
         lineHeight={1.6}
         color="#d8cfe0"
+        linkColor="#c39bd3"
         anchorX="right"
-        anchorY="top"
-        maxWidth={rightWidth}
         textAlign="right"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.body}
-      </Text>
+        opacity={opacity}
+        onNavigate={onNavigate}
+      />
     </>
   );
 }
 
 const PETAL_WHEEL_HTML_SIZE = 360;
 
-/** ③プルチック環パネル用。テキストを左、花びらグラフィックを右に配置する左右分割レイアウト。 */
+/** プルチック環パネル用。テキストを左、花びらグラフィックを右に配置する左右分割レイアウト。 */
 function SplitGraphicPanelLayout({
   content,
   skyWidth,
   skyHeight,
   opacity,
+  onNavigate,
 }: PanelLayoutProps & { content: SplitGraphicPanelContent }) {
   const leftX = -skyWidth * 0.46;
   const leftWidth = skyWidth * 0.42;
@@ -237,21 +310,20 @@ function SplitGraphicPanelLayout({
       >
         {content.heading}
       </Text>
-      <Text
-        position={[leftX, skyHeight * 0.6, 0]}
+      <LinkedBodyText
+        segments={content.body}
+        x={leftX}
+        startY={skyHeight * 0.6}
+        maxWidth={leftWidth}
         fontSize={skyHeight * 0.026}
         lineHeight={1.6}
         color="#d8cfe0"
+        linkColor="#c39bd3"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.body}
-      </Text>
+        opacity={opacity}
+        onNavigate={onNavigate}
+      />
       {/*
         花びらグラフィック：右半分。インタラクション（クリックで感情名表示）は未実装の静止画として配置。
         Html の transform モードは、このシーンのオルソグラフィックカメラ・大きな world 単位（≒px換算）の
@@ -272,6 +344,50 @@ function SplitGraphicPanelLayout({
   );
 }
 
+/** 深掘りルート用。見出し＋本文のシンプルな構成（中央揃え）。 */
+function SimplePanelLayout({
+  content,
+  skyWidth,
+  skyHeight,
+  opacity,
+}: PanelLayoutProps & { content: SimplePanelContent }) {
+  const textWidth = skyWidth * 0.62;
+  return (
+    <>
+      <Text
+        position={[0, skyHeight * 0.86, 0]}
+        fontSize={skyHeight * 0.06}
+        lineHeight={1.3}
+        color="#f4ecf7"
+        anchorX="center"
+        anchorY="top"
+        maxWidth={textWidth}
+        textAlign="center"
+        overflowWrap="break-word"
+        fillOpacity={opacity}
+        sdfGlyphSize={256}
+      >
+        {content.heading}
+      </Text>
+      <Text
+        position={[0, skyHeight * 0.62, 0]}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.6}
+        color="#d8cfe0"
+        anchorX="center"
+        anchorY="top"
+        maxWidth={textWidth}
+        textAlign="center"
+        overflowWrap="break-word"
+        fillOpacity={opacity}
+        sdfGlyphSize={256}
+      >
+        {content.body}
+      </Text>
+    </>
+  );
+}
+
 /**
  * 球の表面（回転軸に沿った円周上）に貼り付ける平らな板。
  * ローカル位置 (0, R cosβ, -R sinβ) ・ローカル回転 -β で固定しておくと、
@@ -287,7 +403,7 @@ function SplitGraphicPanelLayout({
  * 「現在の共有回転角と、この板固有の角度との差」から毎フレーム導出し、
  * 頂点付近だけなめらかに読める状態になるようにする（板自体を個別にアニメーションさせるものではない）。
  */
-function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupRef }: TextPanelProps) {
+function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupRef, onNavigate }: TextPanelProps) {
   const [opacity, setOpacity] = useState(0);
   const position: [number, number, number] = [
     0,
@@ -325,10 +441,25 @@ function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupR
     <group position={position} rotation={[-angle, 0, 0]}>
       <group position={[0, 0, 1]}>
         {content.layout === 'welcome' && (
-          <WelcomePanelLayout content={content} skyWidth={skyWidth} skyHeight={skyHeight} opacity={opacity} />
+          <WelcomePanelLayout
+            content={content}
+            skyWidth={skyWidth}
+            skyHeight={skyHeight}
+            opacity={opacity}
+            onNavigate={onNavigate}
+          />
         )}
         {content.layout === 'split-graphic' && (
-          <SplitGraphicPanelLayout content={content} skyWidth={skyWidth} skyHeight={skyHeight} opacity={opacity} />
+          <SplitGraphicPanelLayout
+            content={content}
+            skyWidth={skyWidth}
+            skyHeight={skyHeight}
+            opacity={opacity}
+            onNavigate={onNavigate}
+          />
+        )}
+        {content.layout === 'simple' && (
+          <SimplePanelLayout content={content} skyWidth={skyWidth} skyHeight={skyHeight} opacity={opacity} />
         )}
       </group>
     </group>
@@ -337,13 +468,38 @@ function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupR
 
 interface PlanetMeshProps {
   stepIndex: number;
+  panelContents: (PlanetPanelContent | null)[];
+  /**
+   * true の場合、マウント時に「現在の stepIndex の位置」へ直接スナップする（アニメーションさせない）。
+   * 深掘りページのような直接リンクでの初期表示（＝いきなり特定パネルへ着地したい場合）向け。
+   * 省略時は false（従来通り、赤道位置からアニメーションして見せる。1枚目のパネルに入る瞬間の
+   * 「回転が実際に見える」体験を保つため、home-introのデフォルト挙動はこちら）。
+   */
+  snapToInitialStep?: boolean;
   /** 球の現在の回転角（ラジアン）を毎フレーム通知する。奥の星空レイヤーなど、この回転と同じ「進み具合」を共有したい2D要素向け。 */
   onRotationChange?: (rotationX: number) => void;
+  /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
+  onNavigate?: (path: string) => void;
 }
 
-function PlanetMesh({ stepIndex, onRotationChange }: PlanetMeshProps) {
+function PlanetMesh({
+  stepIndex,
+  panelContents,
+  snapToInitialStep = false,
+  onRotationChange,
+  onNavigate,
+}: PlanetMeshProps) {
   const rotatingRef = useRef<THREE.Group>(null);
-  const targetRotationX = useRef(BASE_TILT_X + stepIndex * ROTATION_PER_STEP);
+  const panelCount = panelContents.length;
+  const panelAngleStep = getRotationPerStep(panelCount);
+  /**
+   * 画面に見えている頂点（人物の足元）は、SphereGeometryの既定UVでは「極」にあたり、経線が1点に収束して歪む。
+   * 固定のX軸オフセット（＝ちょうどパネル1枚ぶんの角度）で、開始姿勢の見える頂点を歪みの少ない
+   * 「赤道」付近にずらす。パネル間隔と揃えることで、あるステップが読める位置に運ぶパネル番号が
+   * 常に (stepIndex + 1) % panelCount になる（three.js の行列で数値検証済み、panelCountによらず成立）。
+   */
+  const baseTilt = panelAngleStep;
+  const targetRotationX = useRef(baseTilt + stepIndex * panelAngleStep);
   const { size } = useThree();
   const texture = useMemo(() => createPlanetTexture(), []);
 
@@ -354,17 +510,20 @@ function PlanetMesh({ stepIndex, onRotationChange }: PlanetMeshProps) {
   const skyWidth = size.width;
   const skyHeight = HOME_INTRO_HORIZON_RATIO * size.height;
 
-  // マウント直後は「歪みのない赤道位置」に即座にスナップし、そこから現在ステップぶんだけアニメーションさせる。
-  // （rotation.x=0=極からアニメすると歪みが一瞬見えるが、赤道からなら歪まず、かつ初回表示でも回転が目に見える）
+  // マウント直後の初期姿勢。既定は「歪みのない赤道位置」に即座にスナップし、そこから現在ステップ
+  // ぶんだけアニメーションさせる（rotation.x=0=極からアニメすると歪みが一瞬見えるが、赤道からなら
+  // 歪まず、かつ初回表示でも回転が目に見える）。snapToInitialStep が true のときは、直接リンクでの
+  // 着地を想定し、現在の stepIndex の位置へそのままスナップする（アニメーションさせない）。
   useLayoutEffect(() => {
     if (rotatingRef.current) {
-      rotatingRef.current.rotation.x = BASE_TILT_X;
+      rotatingRef.current.rotation.x = snapToInitialStep ? targetRotationX.current : baseTilt;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- マウント時の初期姿勢決定のみに使う
   }, []);
 
   useEffect(() => {
-    targetRotationX.current = BASE_TILT_X + stepIndex * ROTATION_PER_STEP;
-  }, [stepIndex]);
+    targetRotationX.current = baseTilt + stepIndex * panelAngleStep;
+  }, [stepIndex, baseTilt, panelAngleStep]);
 
   useFrame((_, delta) => {
     const group = rotatingRef.current;
@@ -384,15 +543,16 @@ function PlanetMesh({ stepIndex, onRotationChange }: PlanetMeshProps) {
           <sphereGeometry args={[radius, 48, 48]} />
           <meshToonMaterial map={texture} />
         </mesh>
-        {PANEL_CONTENTS.map((content, index) => (
+        {panelContents.map((content, index) => (
           <TextPanel
             key={index}
             radius={radius}
-            angle={index * PANEL_ANGLE_STEP}
+            angle={index * panelAngleStep}
             content={content}
             skyWidth={skyWidth}
             skyHeight={skyHeight}
             rotatingGroupRef={rotatingRef}
+            onNavigate={onNavigate}
           />
         ))}
       </group>
@@ -402,23 +562,39 @@ function PlanetMesh({ stepIndex, onRotationChange }: PlanetMeshProps) {
 
 interface PlanetGlobeProps {
   stepIndex: number;
+  panelContents: (PlanetPanelContent | null)[];
+  snapToInitialStep?: boolean;
   /** 球の現在の回転角（ラジアン）を毎フレーム通知する。奥の星空レイヤーなど、この回転と同じ「進み具合」を共有したい2D要素向け。 */
   onRotationChange?: (rotationX: number) => void;
+  /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
+  onNavigate?: (path: string) => void;
 }
 
 /** 惑星部分のみ Three.js の SphereGeometry で実装した本物の3D球体。凹凸はテクスチャで表現し、フラットなイラスト調のトゥーンマテリアルで陰影を抑える。 */
-export function PlanetGlobe({ stepIndex, onRotationChange }: PlanetGlobeProps) {
+export function PlanetGlobe({
+  stepIndex,
+  panelContents,
+  snapToInitialStep,
+  onRotationChange,
+  onNavigate,
+}: PlanetGlobeProps) {
   return (
     <Canvas
       orthographic
       camera={{ position: [0, 0, 2000], near: 1, far: 10000, zoom: 1 }}
       gl={{ alpha: true, antialias: true }}
       dpr={[1, 2]}
-      style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'auto' }}
     >
       <ambientLight intensity={0.75} />
       <directionalLight position={[0.4, 1, 1]} intensity={1} />
-      <PlanetMesh stepIndex={stepIndex} onRotationChange={onRotationChange} />
+      <PlanetMesh
+        stepIndex={stepIndex}
+        panelContents={panelContents}
+        snapToInitialStep={snapToInitialStep}
+        onRotationChange={onRotationChange}
+        onNavigate={onNavigate}
+      />
     </Canvas>
   );
 }

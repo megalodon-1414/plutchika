@@ -21,10 +21,11 @@ export interface UseStepGestureResult {
 export function useStepGesture(
   stepCount: number,
   containerRef: RefObject<HTMLElement | null>,
+  initialIndex = 0,
 ): UseStepGestureResult {
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [isAnimating, setIsAnimating] = useState(false);
-  const activeIndexRef = useRef(0);
+  const activeIndexRef = useRef(initialIndex);
   const lockedRef = useRef(false);
   const touchStartYRef = useRef<number | null>(null);
   const lockTimerRef = useRef<number | null>(null);
