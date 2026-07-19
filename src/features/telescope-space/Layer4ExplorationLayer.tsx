@@ -5,9 +5,7 @@ import * as THREE from 'three';
 import type { UserPlotRow } from '../../types/userPlot';
 import { isPurePlot } from '../../utils/emotionPlotBridge';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
-import {
-  getLayer3SegmentIndexAt,
-} from './layer3Segments';
+import { getLayer3SegmentIndexForPlot } from './layer3Segments';
 import {
   getTelescopeRegionPlotPosition,
   TELESCOPE_EXPLORATION_VIEW,
@@ -51,8 +49,9 @@ function ExplorationPlot({
     const time = clock.elapsedTime;
     const [x, y] = getTelescopeRegionPlotPosition(region, plot, time);
     group.position.set(x, y, 0.04);
+    // 公転中の純粋感情プロットは位置によらず所属セグメント固定
     const isInSelectedSegment =
-      getLayer3SegmentIndexAt(region, x, y) === selectedSegmentIndex;
+      getLayer3SegmentIndexForPlot(region, plot, time) === selectedSegmentIndex;
 
     let isNearby = isSelected && isInSelectedSegment;
     if (!isSelected && isInSelectedSegment && selectedPlot) {

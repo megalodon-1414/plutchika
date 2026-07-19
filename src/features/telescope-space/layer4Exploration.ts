@@ -12,19 +12,31 @@ export const TELESCOPE_EXPLORATION_VIEW = {
   fov: 72,
   moveMs: 720,
   /** 注視点からのカメラ後退量（面内法線方向） */
-  cameraBack: 0.72,
+  cameraBack: 0.54,
   /** 右寄りオフセット */
-  cameraSide: 0.28,
+  cameraSide: 0.21,
   /** 平面法線（Z）方向の高さ */
-  cameraHeight: 0.62,
+  cameraHeight: 0.47,
   /** 注視点まわりの視点回転（レイヤー3と同方向） */
   cameraYaw: 0.32,
+  /** ドラッグによる注視点まわり回転の感度（rad/px） */
+  rotateSensitivity: 0.0075,
   /** 近傍としてクリック可能な半径（統一空間） */
   nearbyRadius: 0.85,
   /** 近傍外の点の不透明度倍率 */
   distantOpacity: 0.28,
   distantScale: 0.42,
 } as const;
+
+/** レイヤー4 HUD（矢印）と共有するカメラ回転状態 */
+export interface TelescopeExplorationHudState {
+  /** 注視点まわりの現在の回転角（rad） */
+  yaw: number;
+}
+
+export function createTelescopeExplorationHudState(): TelescopeExplorationHudState {
+  return { yaw: 0 };
+}
 
 /** 統一空間上のプロット座標 */
 export function getTelescopeRegionPlotPosition(

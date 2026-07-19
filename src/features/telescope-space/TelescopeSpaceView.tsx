@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import { getBasicEmotion, getEmotionById } from '../../data/emotions';
 import { EmotionMinimap } from '../../components/EmotionMinimap';
+import { ExplorationWordInfoPanel } from '../../components/ExplorationWordInfoPanel';
 import { ROUTES } from '../../routes/paths';
 import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
 import type { UserPlotRow } from '../../types/userPlot';
@@ -28,12 +29,12 @@ import {
 } from './TelescopeGalaxyLayer';
 import {
   groupPlotsByLayer3Segment,
-  getLayer3SegmentIndexAt,
-  LAYER3_BAR_MID_SEGMENT_COUNT,
+  getLayer3SegmentIndexForPlot,
+  LAYER3_SEGMENT_COUNT,
   pickRandomPlotIdInSegment,
 } from './layer3Segments';
 import { getTelescopeRegionDefinition } from './layer3Region';
-import { getTelescopeRegionPlotPosition } from './layer4Exploration';
+import { createTelescopeExplorationHudState } from './layer4Exploration';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
 import { TelescopeSpaceCanvas } from './TelescopeSpaceCanvas';
 import { TelescopeZoomLadder, zoomLevelIndex } from './TelescopeZoomLadder';
@@ -135,6 +136,31 @@ function layerLabel(settled: TelescopeSettledPhase): string {
 
 const EMPTY_FOCUS: TelescopeViewFocus = { nearest: null, nearby: [] };
 
+/**
+ * レイヤー4セグメント移動矢印の楕円軌道。
+ * 角度は画面座標（y下向き）基準。index 0 = 前へ、1 = 次へ。
+ */
+const EXPLORATION_ARROW_BASE_ANGLES = [
+  Math.PI + Math.PI / 6 + (10 * Math.PI) / 180,
+  Math.PI/6 + (10 * Math.PI) / 180,
+] as const;
+/** 楕円半径（レンズ幅・高さに対する%） */
+const EXPLORATION_ARROW_RX = 38;
+/** 検知楕円と同じ扁平率（0.57）をかけた縦半径 */
+const EXPLORATION_ARROW_RY = EXPLORATION_ARROW_RX * 0.57;
+const EXPLORATION_ARROW_SIZE = 78;
+
+function explorationArrowBasePosition(index: number): {
+  left: string;
+  top: string;
+} {
+  const theta = EXPLORATION_ARROW_BASE_ANGLES[index];
+  return {
+    left: `${50 + EXPLORATION_ARROW_RX * Math.cos(theta)}%`,
+    top: `${50 + EXPLORATION_ARROW_RY * Math.sin(theta)}%`,
+  };
+}
+
 function getInfoUiScale(): number {
   if (typeof window === 'undefined') {
     return 1;
@@ -171,6 +197,8 @@ export function TelescopeSpaceView() {
   const retreatTargetRef = useRef<TelescopeSettledPhase | null>(null);
   const regionIndicatorRef = useRef(createTelescopeRegionIndicatorState());
   const segmentFocusRef = useRef(createTelescopeSegmentFocusState());
+  const explorationHudRef = useRef(createTelescopeExplorationHudState());
+  const explorationArrowRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     let frame = 0;
@@ -348,8 +376,7 @@ export function TelescopeSpaceView() {
       if (!region) {
         return;
       }
-      const [x, y] = getTelescopeRegionPlotPosition(region, plot, 0);
-      const index = getLayer3SegmentIndexAt(region, x, y);
+      const index = getLayer3SegmentIndexForPlot(region, plot);
       if (index >= 0) {
         setExplorationSegmentIndex(index);
       }
@@ -368,6 +395,39 @@ export function TelescopeSpaceView() {
   const detailHudMode = settled === 'detail' && layer2HudActive;
   const regionHudMode = settled === 'region';
   const explorationHudMode = settled === 'exploration';
+
+  // レイヤー4のカメラ回転（画面中心支点）に矢印HUDを毎フレーム追従させる。
+  // 空間の見た目に合わせ、円ではなく扁平な楕円軌道上を動かす。
+  useEffect(() => {
+    if (!explorationHudMode) {
+      return;
+    }
+    let frame = 0;
+    const sync = () => {
+      const yaw = explorationHudRef.current.yaw;
+      for (let index = 0; index < EXPLORATION_ARROW_BASE_ANGLES.length; index++) {
+        const el = explorationArrowRefs.current[index];
+        if (!el) {
+          continue;
+        }
+        const base = EXPLORATION_ARROW_BASE_ANGLES[index];
+        const theta = base + yaw;
+        el.style.left = `${50 + EXPLORATION_ARROW_RX * Math.cos(theta)}%`;
+        el.style.top = `${50 + EXPLORATION_ARROW_RY * Math.sin(theta)}%`;
+        // 画面中心から矢印位置への見かけの方位をまっすぐ指す。
+        // index 0（前へ）は三角形が左向きなので半回転補正する。
+        const apparent = Math.atan2(
+          EXPLORATION_ARROW_RY * Math.sin(theta),
+          EXPLORATION_ARROW_RX * Math.cos(theta),
+        );
+        const pointing = index === 0 ? apparent + Math.PI : apparent;
+        el.style.transform = `translate(-50%, -50%) rotate(${pointing}rad)`;
+      }
+      frame = requestAnimationFrame(sync);
+    };
+    frame = requestAnimationFrame(sync);
+    return () => cancelAnimationFrame(frame);
+  }, [explorationHudMode]);
   const selectedEmotion = useMemo(() => {
     if (!focusBasicId) {
       return null;
@@ -384,16 +444,23 @@ export function TelescopeSpaceView() {
       ? { label: emotion.label, color: getPrimaryEmotionColor(selectedDyadId) }
       : null;
   }, [selectedDyadId]);
-  const selectedExploration = useMemo(() => {
-    if (!explorationPlotId) {
-      return null;
-    }
-    const plot = wordPlots.find((row) => row.word_id === explorationPlotId);
-    if (!plot) {
-      return null;
-    }
-    return { label: plot.word_id, color: plotColorFromRow(plot) };
-  }, [explorationPlotId, wordPlots]);
+  const selectedExplorationPlot = useMemo(
+    () =>
+      explorationPlotId
+        ? wordPlots.find((row) => row.word_id === explorationPlotId) ?? null
+        : null,
+    [explorationPlotId, wordPlots],
+  );
+  const selectedExploration = useMemo(
+    () =>
+      selectedExplorationPlot
+        ? {
+            label: selectedExplorationPlot.word_id,
+            color: plotColorFromRow(selectedExplorationPlot),
+          }
+        : null,
+    [selectedExplorationPlot],
+  );
   const explorationPlotsBySegment = useMemo(() => {
     if (!selectedDyadId) {
       return new Map<number, string[]>();
@@ -415,7 +482,7 @@ export function TelescopeSpaceView() {
   /** 指定方向で次に点が入っている区画を探す（空き区画は飛ばす） */
   const findOccupiedExplorationSegment = useCallback(
     (fromIndex: number, direction: -1 | 1): number | null => {
-      const segmentCount = LAYER3_BAR_MID_SEGMENT_COUNT + 2;
+      const segmentCount = LAYER3_SEGMENT_COUNT;
       for (
         let index = fromIndex + direction;
         index >= 0 && index < segmentCount;
@@ -528,13 +595,13 @@ export function TelescopeSpaceView() {
             {explorationHudMode ? (
               <style>{`
                 @keyframes telescopeArrowHover {
-                  0%, 100% { transform: rotate(30deg) translateX(0); }
-                  50% { transform: rotate(30deg) translateX(var(--arrow-nudge, 4px)); }
+                  0%, 100% { transform: translateX(0); }
+                  50% { transform: translateX(var(--arrow-nudge, 4px)); }
                 }
                 @keyframes telescopeArrowPress {
-                  0% { transform: rotate(30deg) scale(1); }
-                  35% { transform: rotate(30deg) scale(1.32); }
-                  100% { transform: rotate(30deg) scale(1); }
+                  0% { transform: scale(1); }
+                  35% { transform: scale(1.32); }
+                  100% { transform: scale(1); }
                 }
                 @keyframes telescopeArrowPulse {
                   from { transform: scale(0.6); opacity: 0.9; }
@@ -549,27 +616,34 @@ export function TelescopeSpaceView() {
                 }
               `}</style>
             ) : null}
-            {explorationHudMode
-              ? ([
-                  // 左右端の位置を画面中心を軸に時計回りへ30度回した配置
-                  // (中心から38%: cos30≒0.866, sin30=0.5)
+            {explorationHudMode ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                }}
+              >
+              {([
+                  // 基準角30度（時計回り）から、カメラ回転に合わせて楕円軌道上を動く
                   {
                     direction: -1 as const,
                     label: '前のセグメントへ',
-                    left: '17.1%',
-                    top: '31%',
+                    arrowIndex: 0,
                     enabled: canMoveExplorationPrevious,
                   },
                   {
                     direction: 1 as const,
                     label: '次のセグメントへ',
-                    left: '82.9%',
-                    top: '69%',
+                    arrowIndex: 1,
                     enabled: canMoveExplorationNext,
                   },
-                ] as const).map(({ direction, label, left, top, enabled }) => (
+                ] as const).map(({ direction, label, arrowIndex, enabled }) => (
                   <button
                     key={direction}
+                    ref={(el) => {
+                      explorationArrowRefs.current[arrowIndex] = el;
+                    }}
                     type="button"
                     className="telescope-seg-arrow"
                     aria-label={label}
@@ -581,10 +655,9 @@ export function TelescopeSpaceView() {
                     }}
                     style={{
                       position: 'absolute',
-                      left,
-                      top,
-                      width: 58,
-                      height: 58,
+                      ...explorationArrowBasePosition(arrowIndex),
+                      width: EXPLORATION_ARROW_SIZE,
+                      height: EXPLORATION_ARROW_SIZE,
                       padding: 0,
                       border: 0,
                       background: 'transparent',
@@ -631,7 +704,6 @@ export function TelescopeSpaceView() {
                       viewBox="0 0 58 58"
                       aria-hidden
                       style={{
-                        transform: 'rotate(30deg)',
                         transformOrigin: '50% 50%',
                         animation:
                           explorationArrowPulse?.direction === direction
@@ -649,8 +721,9 @@ export function TelescopeSpaceView() {
                       />
                     </svg>
                   </button>
-                ))
-              : null}
+                ))}
+              </div>
+            ) : null}
           </>
         }
         rimOverlay={
@@ -678,9 +751,18 @@ export function TelescopeSpaceView() {
           segmentFocus={segmentFocusRef}
           explorationPlotId={explorationPlotId}
           explorationSegmentIndex={explorationSegmentIndex}
+          explorationHud={explorationHudRef}
           onSelectExplorationPlot={handleSelectExplorationPlot}
         />
       </TelescopeEyepiece>
+
+      {zoomPhase === 'exploration' && selectedExplorationPlot ? (
+        <ExplorationWordInfoPanel
+          key={selectedExplorationPlot.word_id}
+          plot={selectedExplorationPlot}
+          rightOffset={210}
+        />
+      ) : null}
 
       <div
         style={{

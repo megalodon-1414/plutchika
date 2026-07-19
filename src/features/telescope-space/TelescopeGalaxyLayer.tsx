@@ -39,11 +39,11 @@ import {
 } from './layer3Region';
 import {
   getLayer3SegmentLayout,
+  getLayer3SegmentMetrics,
   groupPlotsByLayer3Segment,
   LAYER3_BAR_HIGHLIGHT_RADIUS_NDC,
-  LAYER3_BAR_MID_SEGMENT_COUNT,
+  LAYER3_BAR_MID_SEGMENTS_PER_SIDE,
   LAYER3_BAR_SEGMENT_GAP,
-  LAYER3_PURE_SEGMENT_RADIUS_RATIO,
 } from './layer3Segments';
 import { Layer4ExplorationLayer } from './Layer4ExplorationLayer';
 import { TelescopeWordPlotLayer } from './TelescopeWordPlotLayer';
@@ -1791,11 +1791,18 @@ function Layer3BarSegments({
   const dividerRefs = useRef<(THREE.MeshBasicMaterial | null)[]>([]);
   const highlightBlend = useRef<number[]>([]);
   const segments = useMemo(() => getLayer3SegmentLayout(width), [width]);
-  const pureRadius = width * LAYER3_PURE_SEGMENT_RADIUS_RATIO;
-  const halfSpan = TELESCOPE_REGION_VIEW.spanLength / 2;
-  const midHalf = halfSpan - pureRadius;
-  const segmentLength = (midHalf * 2) / LAYER3_BAR_MID_SEGMENT_COUNT;
+  const { dyadRadius, halfSpan, midHalf, segmentLength } =
+    getLayer3SegmentMetrics(width);
   const segmentCount = segments.length;
+  // 矩形ゾーンの区切り線（左右それぞれ両端含む境界位置）
+  const dividerXs = useMemo(() => {
+    const xs: number[] = [];
+    for (let index = 0; index <= LAYER3_BAR_MID_SEGMENTS_PER_SIDE; index++) {
+      xs.push(-midHalf + segmentLength * index);
+      xs.push(dyadRadius + segmentLength * index);
+    }
+    return xs;
+  }, [dyadRadius, midHalf, segmentLength]);
 
   useEffect(() => {
     if (!segmentFocus) {
@@ -1882,19 +1889,14 @@ function Layer3BarSegments({
       shared.closeness = bestCloseness;
     }
 
-    for (
-      let index = 0;
-      index <= LAYER3_BAR_MID_SEGMENT_COUNT;
-      index++
-    ) {
+    for (let index = 0; index < dividerXs.length; index++) {
       const divider = dividerRefs.current[index];
       if (divider) {
-        const localX = -midHalf + segmentLength * index;
         divider.opacity =
           0.42 *
           layer3RevealFactor(
             reveal.current,
-            localX / LAYER3_STRIP_LENGTH + 0.5,
+            dividerXs[index] / LAYER3_STRIP_LENGTH + 0.5,
           );
       }
     }
@@ -1902,41 +1904,27 @@ function Layer3BarSegments({
 
   return (
     <group>
-      {[0, segmentCount - 1].map((segmentIndex) => (
-        <mesh
-          key={`pure-${segmentIndex}`}
-          position={[segments[segmentIndex].centerAlong, 0, 0.012]}
-        >
-          <circleGeometry args={[pureRadius - LAYER3_BAR_SEGMENT_GAP * 0.5, 40]} />
-          <meshBasicMaterial
-            ref={(material) => {
-              materialRefs.current[segmentIndex] = material;
-            }}
-            color={segmentIndex === 0 ? startColor : endColor}
-            transparent
-            opacity={0}
-            depthWrite={false}
-            blending={THREE.AdditiveBlending}
-            toneMapped={false}
-          />
-        </mesh>
-      ))}
-      {Array.from({ length: LAYER3_BAR_MID_SEGMENT_COUNT }, (_, index) => {
-        const x = segments[index + 1].centerAlong;
-        const t = THREE.MathUtils.clamp(x / (halfSpan * 2) + 0.5, 0, 1);
-        return (
-          <mesh key={`highlight-${index}`} position={[x, 0, 0.012]}>
-            <planeGeometry
-              args={[
-                Math.max(0.01, segmentLength - LAYER3_BAR_SEGMENT_GAP),
-                width * 0.96,
-              ]}
+      {segments
+        .filter((segment) => segment.kind !== 'mid')
+        .map((segment) => (
+          <mesh
+            key={`circle-${segment.index}`}
+            position={[segment.centerAlong, 0, 0.012]}
+          >
+            <circleGeometry
+              args={[segment.pureRadius - LAYER3_BAR_SEGMENT_GAP * 0.5, 40]}
             />
             <meshBasicMaterial
               ref={(material) => {
-                materialRefs.current[index + 1] = material;
+                materialRefs.current[segment.index] = material;
               }}
-              color={blendHex(startColor, endColor, t)}
+              color={
+                segment.kind === 'pure-start'
+                  ? startColor
+                  : segment.kind === 'pure-end'
+                    ? endColor
+                    : blendHex(startColor, endColor, 0.5)
+              }
               transparent
               opacity={0}
               depthWrite={false}
@@ -1944,31 +1932,55 @@ function Layer3BarSegments({
               toneMapped={false}
             />
           </mesh>
-        );
-      })}
-      {Array.from(
-        { length: LAYER3_BAR_MID_SEGMENT_COUNT + 1 },
-        (_, index) => {
-          const x = -midHalf + segmentLength * index;
+        ))}
+      {segments
+        .filter((segment) => segment.kind === 'mid')
+        .map((segment) => {
+          const t = THREE.MathUtils.clamp(
+            segment.centerAlong / (halfSpan * 2) + 0.5,
+            0,
+            1,
+          );
           return (
-            <mesh key={`divider-${index}`} position={[x, 0, 0.014]}>
+            <mesh
+              key={`highlight-${segment.index}`}
+              position={[segment.centerAlong, 0, 0.012]}
+            >
               <planeGeometry
-                args={[LAYER3_BAR_SEGMENT_GAP, width * 0.94]}
+                args={[
+                  Math.max(0.01, segment.length - LAYER3_BAR_SEGMENT_GAP),
+                  width * 0.96,
+                ]}
               />
               <meshBasicMaterial
                 ref={(material) => {
-                  dividerRefs.current[index] = material;
+                  materialRefs.current[segment.index] = material;
                 }}
-                color="#090b13"
+                color={blendHex(startColor, endColor, t)}
                 transparent
                 opacity={0}
                 depthWrite={false}
+                blending={THREE.AdditiveBlending}
                 toneMapped={false}
               />
             </mesh>
           );
-        },
-      )}
+        })}
+      {dividerXs.map((x, index) => (
+        <mesh key={`divider-${index}`} position={[x, 0, 0.014]}>
+          <planeGeometry args={[LAYER3_BAR_SEGMENT_GAP, width * 0.94]} />
+          <meshBasicMaterial
+            ref={(material) => {
+              dividerRefs.current[index] = material;
+            }}
+            color="#090b13"
+            transparent
+            opacity={0}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
     </group>
   );
 }
