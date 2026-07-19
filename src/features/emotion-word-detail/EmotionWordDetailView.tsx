@@ -6,7 +6,7 @@ import type { UserPlotRow } from '../../types/userPlot';
 import { getPrimaryEmotionColor } from '../../utils/emotionPlotBridge';
 import { findPlotBySlug } from '../../utils/emotionWordSlug';
 import { DEFAULT_EMOTION_UI_ACCENT, getEmotionUiTheme } from '../../utils/emotionUiTheme';
-import { WordLandingExperience } from './WordLandingExperience';
+import { BACKDROP_STARS, WordLandingExperience } from './WordLandingExperience';
 
 export function EmotionWordDetailView() {
   const { slug = '' } = useParams<{ slug: string }>();
@@ -47,6 +47,38 @@ export function EmotionWordDetailView() {
 
   if (!isLoading && !loadError && plot) {
     return <WordLandingExperience plot={plot} uiTheme={uiTheme} />;
+  }
+
+  // ロード中は本編と同じ夜空の背景のみを表示する（文字やスピナーは出さない）
+  if (isLoading) {
+    return (
+      <div
+        aria-label="読み込み中"
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          overflow: 'hidden',
+          background: 'radial-gradient(circle at 50% 20%, #141c40 0%, #0a0f26 55%, #05070f 100%)',
+        }}
+      >
+        {BACKDROP_STARS.map((star, index) => (
+          <span
+            key={index}
+            style={{
+              position: 'absolute',
+              top: `${star.topPercent}%`,
+              left: `${star.leftVw}vw`,
+              width: star.size,
+              height: star.size,
+              opacity: star.opacity,
+              borderRadius: '50%',
+              background: '#ffffff',
+            }}
+          />
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -109,10 +141,6 @@ export function EmotionWordDetailView() {
             Map に戻る
           </Link>
         </header>
-
-        {isLoading && (
-          <p style={{ margin: 0, opacity: 0.7, letterSpacing: '0.08em' }}>読み込み中…</p>
-        )}
 
         {!isLoading && loadError && (
           <p style={{ margin: 0, color: '#e84855' }}>{loadError}</p>
