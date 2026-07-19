@@ -2,6 +2,9 @@
   /* 惑星の頂点（人物の足元）が来る、画面上端からの距離。
      planet(PlanetGlobe.tsx) / walker はここを基準に揃える。sceneLayout.ts の HOME_INTRO_HORIZON_RATIO と同じ値にする。 */
   --intro-horizon: 90%;
+  /* ④搭乗ステップでロケットが着陸する、画面中央からの右オフセット。
+     BoardingRocket.tsx の ROCKET_OFFSET_X と必ず同じ値にする。 */
+  --rocket-offset-x: 90px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -140,6 +143,27 @@
   animation: home-intro-walk-leg-right 0.72s steps(4) 1;
 }
 
+/*
+  ④搭乗：ロケットの着陸位置（--rocket-offset-x）まで歩き、乗り込むように縮みながら消える。
+  長さ（1.6s）は HomeIntroView.tsx の WALKER_BOARD_DURATION_MS と必ず同じ値にする。
+  forwards で消えたままにし、発射中に人物が再表示されないようにする。
+*/
+.home-intro-walker--board {
+  animation: home-intro-board 0.9s ease-in-out 1 forwards;
+}
+
+.home-intro-walker--board .home-intro-walker__head {
+  animation: home-intro-walk-head 0.45s steps(4) 2;
+}
+
+.home-intro-walker--board .home-intro-walker__leg--left {
+  animation: home-intro-walk-leg-left 0.45s steps(4) 2;
+}
+
+.home-intro-walker--board .home-intro-walker__leg--right {
+  animation: home-intro-walk-leg-right 0.45s steps(4) 2;
+}
+
 /* 進捗・スキップ */
 .home-intro-progress {
   position: absolute;
@@ -245,6 +269,81 @@
   75% {
     transform: rotate(22deg);
   }
+}
+
+/* 人物の乗り込み：サイズは変えず、ロケットへ歩み寄りながらだんだん薄くなって消える */
+@keyframes home-intro-board {
+  0% {
+    transform: translate(-50%, -100%);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--rocket-offset-x)), -100%);
+    opacity: 0;
+  }
+}
+
+/*
+  発射中の暗転レイヤー。ロケットのCanvas（z-index:4）も含めた画面全体の上に重ね、
+  ロケットがカメラへ近づいてくるのに合わせてロケットごと暗くする。
+  ディレイ1.1s＝上昇（0.9s）＋方向転換の間（0.2s）、フェード0.7s＝飛来時間。
+  BoardingRocket.tsx の ASCEND_DURATION_S / TURN_PAUSE_S / DIVE_DURATION_S と必ず同じ値にする。
+*/
+.home-intro-launch-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: #05070f;
+  opacity: 0;
+  pointer-events: none;
+  animation: home-intro-launch-dim 0.7s ease-in 1.1s 1 forwards;
+}
+
+@keyframes home-intro-launch-dim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+
+/* ④搭乗ステップの「感情Mapへ」ボタン。ロケット着陸後（1.8s）にフェードインする */
+.home-intro-board-cta {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  z-index: 6;
+  animation: home-intro-fade-in 0.6s ease 1.8s both;
+}
+
+.home-intro-board-cta__button {
+  padding: 12px 34px;
+  border: 1px solid rgba(195, 155, 211, 0.7);
+  border-radius: 999px;
+  background: rgba(20, 28, 64, 0.55);
+  color: #f4ecf7;
+  font-size: 0.95rem;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 0 18px rgba(195, 155, 211, 0.25);
+  transition:
+    box-shadow 0.3s ease,
+    background 0.3s ease,
+    transform 0.3s ease;
+}
+
+.home-intro-board-cta__button:hover:enabled {
+  background: rgba(60, 48, 100, 0.7);
+  box-shadow: 0 0 26px rgba(195, 155, 211, 0.55);
+  transform: translateY(-2px);
+}
+
+.home-intro-board-cta__button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /*
