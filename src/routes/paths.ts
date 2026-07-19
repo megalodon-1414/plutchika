@@ -6,8 +6,11 @@ export const ROUTES = {
   emotionWordDetail: '/map/:slug',
   /** 望遠鏡モチーフの感情空間（実験） */
   telescopeSpace: '/telescope',
-  /** コンセプト解説チュートリアル */
+
   conceptTutorial: '/concept',
+
+  deepDive: '/deep-dive',
+
   devWords: '/dev/words',
 } as const;
 

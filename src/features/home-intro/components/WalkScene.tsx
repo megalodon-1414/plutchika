@@ -14,7 +14,9 @@
  * 球・パネルのイージングと完全に同期させる。
  */
 import { useRef } from 'react';
-import { PlanetGlobe, ROTATION_PER_STEP } from './PlanetGlobe';
+import type { PlanetPanelContent } from '../panelContent';
+import { getRotationPerStep } from '../planetRotation';
+import { PlanetGlobe } from './PlanetGlobe';
 
 const STAR_COUNT = 60;
 
@@ -24,7 +26,6 @@ const STAR_COUNT = 60;
  * 「控えめ」を保つため小さい値にしてある。
  */
 const STAR_PROGRESS_PER_STEP = 0.03;
-const STAR_PROGRESS_PER_RADIAN = STAR_PROGRESS_PER_STEP / ROTATION_PER_STEP;
 
 /** 中心からの最大距離（vmax）。画面端・角より十分外まで伸ばし、ループの継ぎ目を画面外に隠す。 */
 const STAR_MAX_DISTANCE_VMAX = 85;
@@ -59,13 +60,20 @@ const STARS: Star[] = Array.from({ length: STAR_COUNT }, (_, i) => ({
 
 interface WalkSceneProps {
   stepIndex: number;
+  panelContents: (PlanetPanelContent | null)[];
+  /** 直接リンクでの初期表示時、現在の stepIndex の位置へ即スナップしたい場合に true にする。 */
+  snapToInitialStep?: boolean;
+  /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
+  onNavigate?: (path: string) => void;
 }
 
-export function WalkScene({ stepIndex }: WalkSceneProps) {
+export function WalkScene({ stepIndex, panelContents, snapToInitialStep, onNavigate }: WalkSceneProps) {
   const starRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const rotationPerStep = getRotationPerStep(panelContents.length);
+  const starProgressPerRadian = STAR_PROGRESS_PER_STEP / rotationPerStep;
 
   const handleRotationChange = (rotationX: number) => {
-    const globalProgress = rotationX * STAR_PROGRESS_PER_RADIAN;
+    const globalProgress = rotationX * starProgressPerRadian;
     STARS.forEach((star, index) => {
       const dot = starRefs.current[index];
       if (!dot) {
@@ -102,7 +110,13 @@ export function WalkScene({ stepIndex }: WalkSceneProps) {
         </div>
       </div>
 
-      <PlanetGlobe stepIndex={stepIndex} onRotationChange={handleRotationChange} />
+      <PlanetGlobe
+        stepIndex={stepIndex}
+        panelContents={panelContents}
+        snapToInitialStep={snapToInitialStep}
+        onRotationChange={handleRotationChange}
+        onNavigate={onNavigate}
+      />
     </div>
   );
 }
