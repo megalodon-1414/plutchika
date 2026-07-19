@@ -1,6 +1,5 @@
 import { useMemo, useRef } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ROUTES } from '../../routes/paths';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IntroLogoScreen } from './components/IntroLogoScreen';
 import { IntroWalker } from './components/IntroWalker';
 import { WalkScene } from './components/WalkScene';
@@ -52,9 +51,9 @@ export function HomeIntroView() {
         <span className="home-intro-progress__counter">
           {String(activeIndex + 1).padStart(2, '0')} / {String(HOME_INTRO_STEPS.length).padStart(2, '0')}
         </span>
-        <Link to={ROUTES.emotionMap} className="home-intro-progress__skip">
+        <a href="https://plutchika.vercel.app/telescope" className="home-intro-progress__skip">
           スキップして感情MAPへ
-        </Link>
+        </a>
       </div>
     </div>
   );

@@ -14,6 +14,11 @@ interface TelescopeEyepieceProps {
   rightRail?: ReactNode;
   /** 接眼径の段階値。Layer2では3（通常最大径の約1.2倍） */
   aperture: number;
+  /**
+   * 画面クランプ後にさらに掛ける倍率。1超で画面高さを超えて広がる
+   * （はみ出した円は上下で切れて見える）。
+   */
+  overscan?: number;
   /** 選択した感情色でレンズ外周を発光させる */
   rimGlowColor?: string | null;
 }
@@ -27,16 +32,15 @@ export function TelescopeEyepiece({
   rimOverlay,
   rightRail,
   aperture,
+  overscan = 1,
   rimGlowColor = null,
 }: TelescopeEyepieceProps) {
   const sizeScale = 0.9 + aperture * 0.1;
-  const diameter = `min(${TELESCOPE_EYEPIECE_MAX_PX * sizeScale}px, ${TELESCOPE_EYEPIECE_VH * sizeScale}vh, 96vw)`;
+  const diameter = `calc(min(${TELESCOPE_EYEPIECE_MAX_PX * sizeScale}px, ${TELESCOPE_EYEPIECE_VH * sizeScale}vh, 96vw) * ${overscan})`;
 
   const shellStyle: CSSProperties = {
     position: 'absolute',
     inset: 0,
-    display: 'grid',
-    placeItems: 'center',
     pointerEvents: 'none',
     zIndex: 1,
   };
@@ -44,7 +48,11 @@ export function TelescopeEyepiece({
   const lensStyle: CSSProperties = {
     width: diameter,
     height: diameter,
-    position: 'relative',
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    // 画面より大きい円でも上下左右へ均等にはみ出すよう明示的に中央固定する
+    transform: 'translate(-50%, -50%)',
     borderRadius: '50%',
     pointerEvents: 'auto',
     transition:

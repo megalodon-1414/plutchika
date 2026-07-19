@@ -59,7 +59,7 @@ export const TELESCOPE_ORBIT_FOLLOW_SPEED = 1.35;
 export const TELESCOPE_ORBIT_FOLLOW_MIN_MUL = 0.14;
 
 /** 一段階目（wide）で合成感情をうっすら見せる不透明度 */
-export const TELESCOPE_WIDE_DYAD_OPACITY = 0.3;
+export const TELESCOPE_WIDE_DYAD_OPACITY = 0.48;
 
 /** 8感情の環の半径 — カメラ軸上から見て同じ距離に並ぶ */
 export const TELESCOPE_GALAXY_RADIUS = 2.85;

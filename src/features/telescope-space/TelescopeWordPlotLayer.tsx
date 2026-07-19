@@ -9,6 +9,7 @@ import {
 } from '../../data/emotions';
 import type { UserPlotRow } from '../../types/userPlot';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
+import { ndcDistanceSqToAim } from './telescopeAim';
 import { getTelescopePlotPosition } from './telescopePlotLayout';
 
 interface TelescopeWordPlotLayerProps {
@@ -70,7 +71,7 @@ function isRelatedPlot(plot: UserPlotRow, focusBasicId: BasicEmotionId): boolean
 
 /**
  * detail レイヤー用の単語プロット。
- * 関連点を強調し、画面中央に最も近い関連点を平面から少し持ち上げる。
+ * 関連点を強調し、照準（中央／カーソル）に最も近い関連点を平面から少し持ち上げる。
  */
 export function TelescopeWordPlotLayer({
   plots,
@@ -144,7 +145,7 @@ export function TelescopeWordPlotLayer({
       if (_projectedPlot.z < -1 || _projectedPlot.z > 1) {
         continue;
       }
-      const distance = _projectedPlot.x ** 2 + _projectedPlot.y ** 2;
+      const distance = ndcDistanceSqToAim(_projectedPlot.x, _projectedPlot.y);
       if (distance < centeredDistance) {
         centeredDistance = distance;
         centeredIndex = index;

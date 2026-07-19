@@ -32,11 +32,17 @@ export interface SplitGraphicPanelContent {
   graphic: 'plutchik-wheel';
 }
 
-/** 深掘りルート用。見出し＋本文のシンプルな構成（中央揃え、フック／サブコピーなし）。 */
+/**
+ * 深掘りルート用。必須ルート02（ようこそパネル）と同じ左右分割レイアウト
+ * （フック・見出しは片側、本文はもう片側）。サブコピーはなし。
+ * mirrored が true の場合、左右を反転する（隣り合うパネルと交互にするため）。
+ */
 export interface SimplePanelContent {
   layout: 'simple';
+  hook: string;
   heading: string;
   body: string;
+  mirrored?: boolean;
 }
 
 export type PlanetPanelContent = WelcomePanelContent | SplitGraphicPanelContent | SimplePanelContent;

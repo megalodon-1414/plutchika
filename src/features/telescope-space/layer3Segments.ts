@@ -1,4 +1,5 @@
 import type { UserPlotRow } from '../../types/userPlot';
+import { isPurePlot } from '../../utils/emotionPlotBridge';
 import { getTelescopePlotPosition } from './telescopePlotLayout';
 import {
   TELESCOPE_REGION_VIEW,
@@ -6,17 +7,26 @@ import {
   type TelescopeRegionDefinition,
 } from './layer3Region';
 
-/** バー中央部（混合領域）の分割数 */
+/** バー中央部（混合領域）の分割数。中央円を挟んで半分ずつに割る */
 export const LAYER3_BAR_MID_SEGMENT_COUNT = 6;
+/** 片側あたりの矩形セグメント数 */
+export const LAYER3_BAR_MID_SEGMENTS_PER_SIDE = LAYER3_BAR_MID_SEGMENT_COUNT / 2;
+/** 全セグメント数（両端円 + 中央円 + 矩形×6） */
+export const LAYER3_SEGMENT_COUNT = LAYER3_BAR_MID_SEGMENT_COUNT + 3;
 export const LAYER3_BAR_SEGMENT_GAP = 0.018;
 /** 両端の純粋感情ゾーンの円形セグメント半径（バー幅比） */
 export const LAYER3_PURE_SEGMENT_RADIUS_RATIO = 0.48;
+/** 中央（24感情）の円形セグメント半径（バー幅比） */
+export const LAYER3_DYAD_SEGMENT_RADIUS_RATIO = 0.48;
 export const LAYER3_BAR_HIGHLIGHT_RADIUS_NDC = 0.32;
 
-export type Layer3SegmentKind = 'pure-start' | 'mid' | 'pure-end';
+export type Layer3SegmentKind = 'pure-start' | 'mid' | 'dyad' | 'pure-end';
 
 export interface Layer3SegmentLayout {
-  /** 0 = start側の円、1..N = 中央、N+1 = end側の円 */
+  /**
+   * 0 = start側の円、1..S = 左側矩形、S+1 = 中央（24感情）の円、
+   * S+2..2S+1 = 右側矩形、2S+2 = end側の円（S = 片側矩形数）
+   */
   index: number;
   kind: Layer3SegmentKind;
   /** 中点からのバー方向ローカル X（midpoint 基準） */
@@ -35,14 +45,27 @@ export interface Layer3SegmentFocus {
   closeness: number;
 }
 
+/** レイアウト計算に使う共通寸法 */
+export function getLayer3SegmentMetrics(
+  width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2,
+) {
+  const pureRadius = width * LAYER3_PURE_SEGMENT_RADIUS_RATIO;
+  const dyadRadius = width * LAYER3_DYAD_SEGMENT_RADIUS_RATIO;
+  const halfSpan = TELESCOPE_REGION_VIEW.spanLength / 2;
+  const midHalf = halfSpan - pureRadius;
+  // 片側の矩形ゾーンは端円の内側から中央円の外側まで
+  const segmentLength =
+    (midHalf - dyadRadius) / LAYER3_BAR_MID_SEGMENTS_PER_SIDE;
+  return { pureRadius, dyadRadius, halfSpan, midHalf, segmentLength };
+}
+
 export function getLayer3SegmentLayout(
   width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2,
 ): Layer3SegmentLayout[] {
-  const pureRadius = width * LAYER3_PURE_SEGMENT_RADIUS_RATIO;
-  const halfSpan = TELESCOPE_REGION_VIEW.spanLength / 2;
-  const midHalf = halfSpan - pureRadius;
-  const segmentLength = (midHalf * 2) / LAYER3_BAR_MID_SEGMENT_COUNT;
+  const { pureRadius, dyadRadius, halfSpan, midHalf, segmentLength } =
+    getLayer3SegmentMetrics(width);
   const halfWidth = width / 2;
+  const perSide = LAYER3_BAR_MID_SEGMENTS_PER_SIDE;
 
   const segments: Layer3SegmentLayout[] = [
     {
@@ -55,7 +78,7 @@ export function getLayer3SegmentLayout(
     },
   ];
 
-  for (let index = 0; index < LAYER3_BAR_MID_SEGMENT_COUNT; index++) {
+  for (let index = 0; index < perSide; index++) {
     segments.push({
       index: index + 1,
       kind: 'mid',
@@ -67,7 +90,27 @@ export function getLayer3SegmentLayout(
   }
 
   segments.push({
-    index: LAYER3_BAR_MID_SEGMENT_COUNT + 1,
+    index: perSide + 1,
+    kind: 'dyad',
+    centerAlong: 0,
+    length: dyadRadius * 2,
+    halfWidth,
+    pureRadius: dyadRadius,
+  });
+
+  for (let index = 0; index < perSide; index++) {
+    segments.push({
+      index: perSide + 2 + index,
+      kind: 'mid',
+      centerAlong: dyadRadius + segmentLength * (index + 0.5),
+      length: segmentLength,
+      halfWidth,
+      pureRadius,
+    });
+  }
+
+  segments.push({
+    index: LAYER3_SEGMENT_COUNT - 1,
     kind: 'pure-end',
     centerAlong: halfSpan,
     length: pureRadius * 2,
@@ -78,6 +121,25 @@ export function getLayer3SegmentLayout(
   return segments;
 }
 
+/** 区画中心の統一空間ワールド座標 */
+export function getLayer3SegmentWorldCenter(
+  region: TelescopeRegionDefinition,
+  segmentIndex: number,
+  width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2,
+): [number, number, number] {
+  const segments = getLayer3SegmentLayout(width);
+  const segment =
+    segments[segmentIndex] ??
+    segments[Math.floor(segments.length / 2)] ??
+    segments[0];
+  const [ux, uy] = region.direction;
+  return [
+    region.midpoint[0] + ux * segment.centerAlong,
+    region.midpoint[1] + uy * segment.centerAlong,
+    0,
+  ];
+}
+
 /** 統一空間上の (x,y) が属する区画 index。範囲外は -1 */
 export function getLayer3SegmentIndexAt(
   region: TelescopeRegionDefinition,
@@ -85,11 +147,9 @@ export function getLayer3SegmentIndexAt(
   y: number,
   width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2,
 ): number {
-  const segments = getLayer3SegmentLayout(width);
-  const pureRadius = width * LAYER3_PURE_SEGMENT_RADIUS_RATIO;
-  const halfSpan = TELESCOPE_REGION_VIEW.spanLength / 2;
-  const midHalf = halfSpan - pureRadius;
-  const segmentLength = (midHalf * 2) / LAYER3_BAR_MID_SEGMENT_COUNT;
+  const { pureRadius, dyadRadius, halfSpan, midHalf, segmentLength } =
+    getLayer3SegmentMetrics(width);
+  const perSide = LAYER3_BAR_MID_SEGMENTS_PER_SIDE;
   const [ux, uy] = region.direction;
   const relX = x - region.midpoint[0];
   const relY = y - region.midpoint[1];
@@ -99,14 +159,54 @@ export function getLayer3SegmentIndexAt(
   if (Math.hypot(along + halfSpan, perp) <= pureRadius) {
     return 0;
   }
-  if (Math.hypot(along - halfSpan, perp) <= pureRadius) {
-    return segments.length - 1;
+  if (Math.hypot(along, perp) <= dyadRadius) {
+    return perSide + 1;
   }
-  const index = Math.floor((along + midHalf) / segmentLength);
-  if (index >= 0 && index < LAYER3_BAR_MID_SEGMENT_COUNT) {
+  if (Math.hypot(along - halfSpan, perp) <= pureRadius) {
+    return LAYER3_SEGMENT_COUNT - 1;
+  }
+  if (along >= -midHalf && along < -dyadRadius) {
+    const index = Math.min(
+      perSide - 1,
+      Math.floor((along + midHalf) / segmentLength),
+    );
     return index + 1;
   }
+  if (along > dyadRadius && along <= midHalf) {
+    const index = Math.min(
+      perSide - 1,
+      Math.floor((along - dyadRadius) / segmentLength),
+    );
+    return perSide + 2 + index;
+  }
   return -1;
+}
+
+/**
+ * プロット単位の所属区画。
+ * 公転する純粋感情プロットは位置に関係なく、常にその感情の円形セグメント
+ * （start/end の純粋円・中央の24感情円）に固定する。
+ */
+export function getLayer3SegmentIndexForPlot(
+  region: TelescopeRegionDefinition,
+  plot: UserPlotRow,
+  time = 0,
+  width = TELESCOPE_REGION_VIEW.regionHalfWidth * 2,
+): number {
+  if (isPurePlot(plot)) {
+    if (plot.primaryId === region.start.id) {
+      return 0;
+    }
+    if (plot.primaryId === region.end.id) {
+      return LAYER3_SEGMENT_COUNT - 1;
+    }
+    if (plot.primaryId === region.id) {
+      return LAYER3_BAR_MID_SEGMENTS_PER_SIDE + 1;
+    }
+  }
+  const real = getTelescopePlotPosition(plot, time);
+  const [x, y] = telescopeRegionToUnifiedSpace(region, real[0], real[1]);
+  return getLayer3SegmentIndexAt(region, x, y, width);
 }
 
 /**
@@ -121,9 +221,7 @@ export function groupPlotsByLayer3Segment(
 ): Map<number, string[]> {
   const bySegment = new Map<number, string[]>();
   for (const plot of plots) {
-    const real = getTelescopePlotPosition(plot, time);
-    const [x, y] = telescopeRegionToUnifiedSpace(region, real[0], real[1]);
-    const index = getLayer3SegmentIndexAt(region, x, y, width);
+    const index = getLayer3SegmentIndexForPlot(region, plot, time, width);
     if (index < 0) {
       continue;
     }

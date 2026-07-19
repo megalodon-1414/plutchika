@@ -61,8 +61,9 @@
 .home-intro-stars__dot {
   position: absolute;
   left: 50%;
-  top: 50%;
-  /* left/top/width/height は毎フレームJSで直接書き換える。ここでは中心アンカーだけ固定しておく。
+  top: var(--intro-horizon);
+  /* left/top/width/height は毎フレームJSで直接書き換える。ここでは初期アンカー（消失点＝人物の立ち位置）だけ
+     固定しておく。消失点を画面中央ではなく地平線に揃えることで、人物・地面のシルエットに隠れて見えなくなる。
      transitionは付けない。球の回転角を毎フレーム直接反映しており、
      そのライブな値自体が既になめらかにイージングされているため。 */
   transform: translate(-50%, -50%);

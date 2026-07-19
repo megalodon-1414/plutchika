@@ -89,16 +89,6 @@ interface PanelLayoutProps {
   onNavigate?: (path: string) => void;
 }
 
-/**
- * CJK主体のテキストを前提に、maxWidth（px相当）とfontSizeから折り返し行数を概算する。
- * troika-three-textは実際の折り返し位置を同期的に取得できないため、あくまで目安。
- * 「仮」コピー段階の縦位置合わせとしては十分な精度で、最終コピー確定時に見た目を調整する前提。
- */
-function estimateSegmentLines(text: string, maxWidth: number, fontSize: number): number {
-  const charsPerLine = Math.max(1, Math.floor(maxWidth / fontSize));
-  return Math.max(1, Math.ceil(text.length / charsPerLine));
-}
-
 interface LinkedBodyTextProps {
   segments: BodyTextSegment[];
   x: number;
@@ -115,10 +105,17 @@ interface LinkedBodyTextProps {
 }
 
 /**
- * 本文の断片配列を、上から順に行として積み上げて描画する。
- * 3Dテキスト（troika-three-text）は1メッシュ＝1スタイルで、HTMLの<a>のように文中の
- * 一部だけを別スタイル＋クリック可能にする機能がないため、linkTo を持つ断片は
- * 「その断片だけの行」として分割し、別の色・クリックハンドラを与える。
+ * 本文の断片配列を、文中にリンク語が自然に組み込まれた見た目で描画する。
+ *
+ * troika-three-text（<Text>）は1メッシュ＝1スタイルで、HTMLの<a>のように文中の一部だけを
+ * 別スタイル＋クリック可能にすることができない。そこで本文だけは通常のHTML（<Html>、
+ * 花びらグラフィックと同じ非transformモード）で描画し、実際の<a>タグを使うことで、
+ * ブラウザ標準の折り返し・インライン配置にリンク語をそのまま任せる。
+ *
+ * Html（非transformモード）はワールド座標をスクリーン座標へ投影するだけで、
+ * 追加のスケーリングは行わない。このシーンはオルソグラフィックカメラを世界単位＝
+ * CSSピクセルになるよう設定しているため、fontSize/maxWidth等の数値をそのままpxとして使える
+ * （花びらグラフィックのHtml配置と同じ前提）。
  */
 function LinkedBodyText({
   segments,
@@ -134,60 +131,44 @@ function LinkedBodyText({
   opacity,
   onNavigate,
 }: LinkedBodyTextProps) {
-  const segmentYs: number[] = [];
-  segments.reduce((cursorY, segment) => {
-    segmentYs.push(cursorY);
-    return cursorY - estimateSegmentLines(segment.text, maxWidth, fontSize) * fontSize * lineHeight;
-  }, startY);
+  const anchorTransform =
+    anchorX === 'right' ? 'translateX(-100%)' : anchorX === 'center' ? 'translateX(-50%)' : 'none';
 
   return (
-    <>
-      {segments.map((segment, index) => {
-        const y = segmentYs[index];
-        const isLink = Boolean(segment.linkTo);
-        return (
-          <Text
-            key={index}
-            position={[x, y, 0]}
-            fontSize={fontSize}
-            lineHeight={lineHeight}
-            color={isLink ? linkColor : color}
-            anchorX={anchorX}
-            anchorY="top"
-            maxWidth={maxWidth}
-            textAlign={textAlign}
-            overflowWrap="break-word"
-            fillOpacity={opacity}
-            sdfGlyphSize={256}
-            onClick={
-              isLink
-                ? (event) => {
-                    event.stopPropagation();
-                    onNavigate?.(segment.linkTo as string);
-                  }
-                : undefined
-            }
-            onPointerOver={
-              isLink
-                ? (event) => {
-                    event.stopPropagation();
-                    document.body.style.cursor = 'pointer';
-                  }
-                : undefined
-            }
-            onPointerOut={
-              isLink
-                ? () => {
-                    document.body.style.cursor = 'auto';
-                  }
-                : undefined
-            }
-          >
-            {segment.text}
-          </Text>
-        );
-      })}
-    </>
+    <Html position={[x, startY, 0]} style={{ pointerEvents: 'none' }}>
+      <div
+        style={{
+          transform: anchorTransform,
+          width: maxWidth,
+          fontSize,
+          lineHeight,
+          color,
+          textAlign,
+          opacity,
+          transition: 'opacity 0.2s linear',
+          wordBreak: 'break-word',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {segments.map((segment, index) =>
+          segment.linkTo ? (
+            <a
+              key={index}
+              href={segment.linkTo}
+              style={{ color: linkColor, pointerEvents: 'auto', cursor: 'pointer', textDecoration: 'underline' }}
+              onClick={(event) => {
+                event.preventDefault();
+                onNavigate?.(segment.linkTo as string);
+              }}
+            >
+              {segment.text}
+            </a>
+          ) : (
+            <span key={index}>{segment.text}</span>
+          ),
+        )}
+      </div>
+    </Html>
   );
 }
 
@@ -202,7 +183,10 @@ function WelcomePanelLayout({
   const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.5;
   const rightX = skyWidth * 0.42;
-  const rightWidth = skyWidth * 0.48;
+  const bodyFontSize = skyHeight * 0.026;
+  // 折り返し幅を文字数4つ分ほど広げ、「か?」「です。」のような孤立した末尾の1〜2文字が
+  // 単独の行にならないようにする（改行位置＝\nの箇所は変更しない。あくまで自動折り返しの幅だけ広げる）。
+  const rightWidth = skyWidth * 0.48 + bodyFontSize * 8;
   return (
     <>
       <Text
@@ -221,7 +205,7 @@ function WelcomePanelLayout({
       </Text>
       <Text
         position={[leftX, skyHeight * 0.82, 0]}
-        fontSize={skyHeight * 0.065}
+        fontSize={skyHeight * 0.06}
         lineHeight={1.3}
         color="#f4ecf7"
         anchorX="left"
@@ -254,7 +238,7 @@ function WelcomePanelLayout({
         x={rightX}
         startY={skyHeight * 0.42}
         maxWidth={rightWidth}
-        fontSize={skyHeight * 0.024}
+        fontSize={bodyFontSize}
         lineHeight={1.6}
         color="#d8cfe0"
         linkColor="#c39bd3"
@@ -344,25 +328,54 @@ function SplitGraphicPanelLayout({
   );
 }
 
-/** 深掘りルート用。見出し＋本文のシンプルな構成（中央揃え）。 */
+/**
+ * 深掘りルート用。必須ルート02（ようこそパネル＝WelcomePanelLayout）と同じ左右分割レイアウト。
+ * フック・見出しは片側、本文はもう片側。content.mirrored が true なら左右を入れ替える
+ * （隣り合うパネル同士で交互に配置するため。深掘りは本文がリンクを含まない単純な文字列なので
+ * 通常の<Text>で描画する）。
+ */
 function SimplePanelLayout({
   content,
   skyWidth,
   skyHeight,
   opacity,
 }: PanelLayoutProps & { content: SimplePanelContent }) {
-  const textWidth = skyWidth * 0.62;
+  const mirrored = Boolean(content.mirrored);
+  const headingX = mirrored ? skyWidth * 0.42 : -skyWidth * 0.42;
+  const headingWidth = skyWidth * 0.5;
+  const headingAnchorX: 'left' | 'right' = mirrored ? 'right' : 'left';
+
+  const bodyX = mirrored ? -skyWidth * 0.42 : skyWidth * 0.42;
+  const bodyFontSize = skyHeight * 0.026;
+  // WelcomePanelLayoutと同様、末尾の孤立行を防ぐため文字数8つ分ほど幅を広げてある。
+  const bodyWidth = skyWidth * 0.48 + bodyFontSize * 8;
+  const bodyAnchorX: 'left' | 'right' = mirrored ? 'left' : 'right';
+
   return (
     <>
       <Text
-        position={[0, skyHeight * 0.86, 0]}
+        position={[headingX, skyHeight * 0.92, 0]}
+        fontSize={skyHeight * 0.032}
+        color="#9f8aaa"
+        anchorX={headingAnchorX}
+        anchorY="top"
+        maxWidth={headingWidth}
+        textAlign={headingAnchorX}
+        overflowWrap="break-word"
+        fillOpacity={opacity}
+        sdfGlyphSize={256}
+      >
+        {content.hook}
+      </Text>
+      <Text
+        position={[headingX, skyHeight * 0.82, 0]}
         fontSize={skyHeight * 0.06}
         lineHeight={1.3}
         color="#f4ecf7"
-        anchorX="center"
+        anchorX={headingAnchorX}
         anchorY="top"
-        maxWidth={textWidth}
-        textAlign="center"
+        maxWidth={headingWidth}
+        textAlign={headingAnchorX}
         overflowWrap="break-word"
         fillOpacity={opacity}
         sdfGlyphSize={256}
@@ -370,14 +383,14 @@ function SimplePanelLayout({
         {content.heading}
       </Text>
       <Text
-        position={[0, skyHeight * 0.62, 0]}
-        fontSize={skyHeight * 0.028}
+        position={[bodyX, skyHeight * 0.52, 0]}
+        fontSize={bodyFontSize}
         lineHeight={1.6}
         color="#d8cfe0"
-        anchorX="center"
+        anchorX={bodyAnchorX}
         anchorY="top"
-        maxWidth={textWidth}
-        textAlign="center"
+        maxWidth={bodyWidth}
+        textAlign={bodyAnchorX}
         overflowWrap="break-word"
         fillOpacity={opacity}
         sdfGlyphSize={256}

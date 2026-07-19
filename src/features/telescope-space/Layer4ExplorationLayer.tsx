@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import type { UserPlotRow } from '../../types/userPlot';
 import { isPurePlot } from '../../utils/emotionPlotBridge';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
+import { getLayer3SegmentIndexForPlot } from './layer3Segments';
 import {
   getTelescopeRegionPlotPosition,
   TELESCOPE_EXPLORATION_VIEW,
@@ -18,12 +19,14 @@ const WAVE_DURATION = 4.2;
 function ExplorationPlot({
   plot,
   region,
+  selectedSegmentIndex,
   selectedPlotId,
   selectedPlot,
   onSelect,
 }: {
   plot: UserPlotRow;
   region: TelescopeRegionDefinition;
+  selectedSegmentIndex: number;
   selectedPlotId: string;
   selectedPlot: UserPlotRow | null;
   onSelect: (id: string) => void;
@@ -46,9 +49,12 @@ function ExplorationPlot({
     const time = clock.elapsedTime;
     const [x, y] = getTelescopeRegionPlotPosition(region, plot, time);
     group.position.set(x, y, 0.04);
+    // 公転中の純粋感情プロットは位置によらず所属セグメント固定
+    const isInSelectedSegment =
+      getLayer3SegmentIndexForPlot(region, plot, time) === selectedSegmentIndex;
 
-    let isNearby = isSelected;
-    if (!isSelected && selectedPlot) {
+    let isNearby = isSelected && isInSelectedSegment;
+    if (!isSelected && isInSelectedSegment && selectedPlot) {
       const [sx, sy] = getTelescopeRegionPlotPosition(
         region,
         selectedPlot,
@@ -104,19 +110,7 @@ function ExplorationPlot({
 
   return (
     <group ref={groupRef}>
-      <mesh
-        ref={hitRef}
-        onClick={handleClick}
-        onPointerOver={(event) => {
-          if (!isSelected && nearbyRef.current) {
-            event.stopPropagation();
-            document.body.style.cursor = 'pointer';
-          }
-        }}
-        onPointerOut={() => {
-          document.body.style.cursor = 'grab';
-        }}
-      >
+      <mesh ref={hitRef} onClick={handleClick}>
         <sphereGeometry args={[PLOT_RADIUS * 1.45, 10, 10]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
@@ -150,7 +144,11 @@ function ExplorationPlot({
       {plot.wordType === 'adjective' || isPurePlot(plot) ? (
         <Html
           center
-          style={{ pointerEvents: 'none', transform: 'translateY(-18px)' }}
+          style={{
+            pointerEvents: 'none',
+            // 点の直下にラベルの上端が来るよう下げつつ、見た目のずれを補正
+            transform: 'translate(-28px, calc(50% + 10px))',
+          }}
         >
           <div
             ref={labelRef}
@@ -159,7 +157,7 @@ function ExplorationPlot({
               writingMode: 'vertical-rl',
               textOrientation: 'upright',
               whiteSpace: 'nowrap',
-              fontSize: 15,
+              fontSize: 35,
               letterSpacing: '0.1em',
               color,
               opacity: 0,
@@ -177,6 +175,7 @@ function ExplorationPlot({
 interface Layer4ExplorationLayerProps {
   region: TelescopeRegionDefinition;
   plots: readonly UserPlotRow[];
+  selectedSegmentIndex: number;
   selectedPlotId: string;
   onSelectPlot: (id: string) => void;
 }
@@ -188,6 +187,7 @@ interface Layer4ExplorationLayerProps {
 export function Layer4ExplorationLayer({
   region,
   plots,
+  selectedSegmentIndex,
   selectedPlotId,
   onSelectPlot,
 }: Layer4ExplorationLayerProps) {
@@ -203,6 +203,7 @@ export function Layer4ExplorationLayer({
           key={plot.word_id}
           plot={plot}
           region={region}
+          selectedSegmentIndex={selectedSegmentIndex}
           selectedPlotId={selectedPlotId}
           selectedPlot={selectedPlot}
           onSelect={onSelectPlot}

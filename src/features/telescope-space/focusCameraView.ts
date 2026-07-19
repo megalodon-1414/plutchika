@@ -26,8 +26,19 @@ export const TELESCOPE_FOCUS_VIEW = {
   focusDrop: 0,
   fov: 38,
   moveMs: 720,
+  /** 到着後、選択感情の注視から視線を少し上へ持ち上げる時間 */
+  tiltUpMs: 600,
+  /** バー登場アニメーション開始から見上げ開始までの遅延 */
+  tiltUpDelayMs:900,
+  /** 見上げ量: 最終注視点を環の中心から +Z へ持ち上げる高さ */
+  tiltUpRise: 0,
+  /**
+   * 見上げの強さ 0..1。
+   * 0 = 選択感情を見たまま（見上げなし）、1 = 環の中心（+tiltUpRise）まで見上げる。
+   */
+  tiltUpBlend: 0.5,
   orbitYawMax: 1.05,
-  orbitPitchMax: 0.38,
+  orbitPitchMax: 0.3,
   orbitSensitivity: 0.0011,
   relatedMaxDistance: 3 as 1 | 2 | 3,
   includePartnerBasics: true,
@@ -124,11 +135,18 @@ export function computeFocusCameraPose(
     uz * radial + TELESCOPE_FOCUS_VIEW.zLift,
   ];
 
-  // Layer2到着時の初期注視点＝8感情環の中心。
+  // Layer2の最終注視点。到着直後は選択感情を注視し、その後ここに視線を上げる。
+  // 選択感情 → 環の中心(+tiltUpRise) を tiltUpBlend で内分して見上げ角度を抑える。
+  const fullUp: [number, number, number] = [
+    0,
+    0,
+    -TELESCOPE_FOCUS_VIEW.focusDrop + TELESCOPE_FOCUS_VIEW.tiltUpRise,
+  ];
+  const blend = TELESCOPE_FOCUS_VIEW.tiltUpBlend;
   const lookAt: [number, number, number] = [
-    0,
-    0,
-    -TELESCOPE_FOCUS_VIEW.focusDrop,
+    ex + (fullUp[0] - ex) * blend,
+    ey + (fullUp[1] - ey) * blend,
+    ez + (fullUp[2] - ez) * blend,
   ];
 
   return { position, lookAt };
