@@ -1,17 +1,35 @@
-import { useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo, useRef } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ROUTES } from '../../routes/paths';
 import { IntroLogoScreen } from './components/IntroLogoScreen';
-import { IntroSky } from './components/IntroSky';
 import { IntroWalker } from './components/IntroWalker';
 import { WalkScene } from './components/WalkScene';
+import { buildPanelContents } from './panelContent';
 import { HOME_INTRO_STEPS } from './steps';
 import { useStepGesture } from './useStepGesture';
 import './home-intro.css';
 
+const PANEL_CONTENTS = buildPanelContents(HOME_INTRO_STEPS, HOME_INTRO_STEPS.length);
+
+/** URLの `?step=<id>` から復元する初期ステップのインデックス。一致しない場合は先頭（ロゴ）から。 */
+function resolveInitialIndex(stepIdParam: string | null): number {
+  if (!stepIdParam) {
+    return 0;
+  }
+  const index = HOME_INTRO_STEPS.findIndex((step) => step.id === stepIdParam);
+  return index >= 0 ? index : 0;
+}
+
 export function HomeIntroView() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const { activeIndex, isAnimating } = useStepGesture(HOME_INTRO_STEPS.length, containerRef);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialIndex = useMemo(
+    () => resolveInitialIndex(searchParams.get('step')),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 初回マウント時の復元にのみ使う（以後のURL変化には追従しない）
+    [],
+  );
+  const { activeIndex, isAnimating } = useStepGesture(HOME_INTRO_STEPS.length, containerRef, initialIndex);
   const activeStep = HOME_INTRO_STEPS[activeIndex];
 
   return (
@@ -20,8 +38,12 @@ export function HomeIntroView() {
         <IntroLogoScreen />
       ) : (
         <>
-          {activeStep.content && <IntroSky stepKey={activeStep.id} content={activeStep.content} />}
-          <WalkScene stepIndex={activeIndex} />
+          <WalkScene
+            stepIndex={activeIndex}
+            panelContents={PANEL_CONTENTS}
+            snapToInitialStep={initialIndex !== 0}
+            onNavigate={navigate}
+          />
           <IntroWalker stepping={isAnimating} />
         </>
       )}
