@@ -6,7 +6,8 @@ import type { UserPlotRow } from '../../types/userPlot';
 import { getPrimaryEmotionColor } from '../../utils/emotionPlotBridge';
 import { findPlotBySlug } from '../../utils/emotionWordSlug';
 import { DEFAULT_EMOTION_UI_ACCENT, getEmotionUiTheme } from '../../utils/emotionUiTheme';
-import { BACKDROP_STARS, WordLandingExperience } from './WordLandingExperience';
+import { HomeStarfield } from '../home-intro/components/HomeStarfield';
+import { WordLandingExperience } from './WordLandingExperience';
 
 export function EmotionWordDetailView() {
   const { slug = '' } = useParams<{ slug: string }>();
@@ -49,7 +50,7 @@ export function EmotionWordDetailView() {
     return <WordLandingExperience plot={plot} uiTheme={uiTheme} />;
   }
 
-  // ロード中は本編と同じ夜空の背景のみを表示する（文字やスピナーは出さない）
+  // ロード中は本編と同じ3D夜空のみを表示する（文字やスピナーは出さない）
   if (isLoading) {
     return (
       <div
@@ -59,24 +60,10 @@ export function EmotionWordDetailView() {
           width: '100%',
           height: '100%',
           overflow: 'hidden',
-          background: 'radial-gradient(circle at 50% 20%, #141c40 0%, #0a0f26 55%, #05070f 100%)',
+          background: '#05070f',
         }}
       >
-        {BACKDROP_STARS.map((star, index) => (
-          <span
-            key={index}
-            style={{
-              position: 'absolute',
-              top: `${star.topPercent}%`,
-              left: `${star.leftVw}vw`,
-              width: star.size,
-              height: star.size,
-              opacity: star.opacity,
-              borderRadius: '50%',
-              background: '#ffffff',
-            }}
-          />
-        ))}
+        <HomeStarfield />
       </div>
     );
   }

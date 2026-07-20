@@ -12,6 +12,7 @@ import { FLAG_EXPAND_POLE_SCALE, FLAG_EXPAND_POLE_SCALE_MOBILE } from './FlagMod
 import { RocketModel, ROCKET_TAKEOFF_TOTAL_MS } from './RocketModel';
 import { buildTelescopeRestoreState } from '../telescope-space/telescopeRestore';
 import { useAppCornerMenuExtras } from '../../components/site/AppCornerMenu';
+import { HomeStarfield } from '../home-intro/components/HomeStarfield';
 
 /** Mapに戻る：人物がロケットへ歩いて乗り込む時間（CSSの personBoard と一致） */
 const PERSON_BOARD_MS = 900;
@@ -35,13 +36,7 @@ interface PlantingState {
   phase: 'walk' | 'plant';
 }
 
-/* 背景の星空。ホーム(WalkScene)と同じ生成規則で決定的に配置する。ロード画面でも使う。 */
-export const BACKDROP_STARS = Array.from({ length: 60 }, (_, i) => ({
-  topPercent: (i * 13) % 70,
-  leftVw: (i * 37) % 100,
-  size: 1 + (i % 3),
-  opacity: 0.35 + ((i * 7) % 5) * 0.12,
-}));
+/* 背景の星空。HomeStarfield（3D）が担当するため、旧2D星配置は廃止 */
 
 interface PlantedFlag {
   id: string;
@@ -770,7 +765,7 @@ export function WordLandingExperience({
       className="word-landing"
       style={{
         color: uiTheme.uiText,
-        background: 'radial-gradient(circle at 50% 20%, #141c40 0%, #0a0f26 55%, #05070f 100%)',
+        background: '#05070f',
         '--gem-size': `${surface.gemSize}px`,
         '--gem-shadow-top': `${Math.round(surface.gemSize * 1.13)}px`,
         '--gem-shadow-width': `${Math.round(surface.gemSize * 0.33)}px`,
@@ -792,20 +787,6 @@ export function WordLandingExperience({
           min-height: 620px;
           overflow: hidden;
           isolation: isolate;
-        }
-        /* 星の回転に合わせて空ごと回すため、回転して端が見えないよう一回り大きく取る。
-           回転の中心は惑星の中心（インラインのtransform-originで指定） */
-        .word-landing__stars {
-          position: absolute;
-          inset: -40%;
-          z-index: 0;
-          pointer-events: none;
-          transition: transform .8s cubic-bezier(.25,.6,.25,1);
-        }
-        .word-landing__stars span {
-          position: absolute;
-          border-radius: 50%;
-          background: #ffffff;
         }
         .word-landing__header {
           position: absolute;
@@ -1896,28 +1877,7 @@ export function WordLandingExperience({
         }
       `}</style>
 
-      {/* 星（惑星）の回転に合わせて、空も惑星中心まわりに一緒に回す */}
-      <div
-        className="word-landing__stars"
-        aria-hidden
-        style={{
-          transform: `rotate(${planetRotationDelta}rad)`,
-          transformOrigin: `50% ${1.4 * surface.vh - surface.centerBottom}px`,
-        }}
-      >
-        {BACKDROP_STARS.map((star, index) => (
-          <span
-            key={index}
-            style={{
-              top: `${star.topPercent}%`,
-              left: `${star.leftVw}%`,
-              width: star.size,
-              height: star.size,
-              opacity: star.opacity,
-            }}
-          />
-        ))}
-      </div>
+      <HomeStarfield />
 
       <header className="word-landing__header">
         <div>
