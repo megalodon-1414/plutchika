@@ -451,7 +451,7 @@ export function Layer4ExplorationLayer({
       ),
     [plots, region],
   );
-  const labelLevels = useRef<Map<string, number>>(new Map());
+  const labelLevels = useRef<Map<string, LabelPlacement>>(new Map());
 
   return (
     <group>

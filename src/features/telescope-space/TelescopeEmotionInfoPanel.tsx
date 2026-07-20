@@ -107,6 +107,7 @@ export function TelescopeEmotionInfoPanel({
     ).currentWordPanel;
     if (horizontal) {
       return {
+        kind: 'horizontal' as const,
         paddingY: Math.max(10, Math.round(base.paddingY * 0.55)),
         paddingX: Math.max(12, Math.round(base.paddingX * 0.7)),
         borderRadius: base.borderRadius,
@@ -124,6 +125,7 @@ export function TelescopeEmotionInfoPanel({
     const paddingX = Math.round(base.paddingX * 1.35);
     const innerMaxHeight = Math.max(120, panelMaxHeight - paddingY * 2);
     return {
+      kind: 'vertical' as const,
       ...base,
       height: panelMaxHeight,
       innerMinHeight: innerMaxHeight,
@@ -151,7 +153,7 @@ export function TelescopeEmotionInfoPanel({
   const topInset =
     top ?? Math.max(72, Math.round(viewport.height * 0.1));
 
-  if (horizontal) {
+  if (layout.kind === 'horizontal') {
     return (
       <aside
         key={panelKey}
