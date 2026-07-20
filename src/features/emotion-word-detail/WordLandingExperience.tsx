@@ -8,7 +8,7 @@ import { getEmotionWordSlug } from '../../utils/emotionWordSlug';
 import { wordTypeLabel } from '../../utils/emotionWordsBridge';
 import { OctahedronIcon } from './OctahedronIcon';
 import { PlanetSphere, PlantedFlagsLayer, wordPlanetRadius, wordPlanetHorizonRatio, FLAG_POLE_EXTEND_DURATION, FLAG_SIZE_DESKTOP, FLAG_SIZE_MOBILE, FLAG_LOAD_APPEAR_DELAY_SEC } from './PlanetSphere';
-import { FLAG_EXPAND_POLE_SCALE } from './FlagModel';
+import { FLAG_EXPAND_POLE_SCALE, FLAG_EXPAND_POLE_SCALE_MOBILE } from './FlagModel';
 import { RocketModel, ROCKET_TAKEOFF_TOTAL_MS } from './RocketModel';
 import { buildTelescopeRestoreState } from '../telescope-space/telescopeRestore';
 
@@ -23,15 +23,15 @@ interface WordLandingExperienceProps {
 type LandingPanel = 'compose' | 'meaning';
 
 /** 旗を立てるモーションの進行状態。
- * walk-across=ジェム横から横移動 / walk-depth=斜面を奥へ縦移動 / plant=旗を刺す動作中
+ * walk=旗の場所へ歩く / plant=旗を刺す動作中
  */
 interface PlantingState {
   flag: PlantedFlag;
   /** いま向かっている／立っている画面位置 */
   spot: { x: number; bottom: number };
-  /** 最終的に旗を刺す場所（カメラはこの地点を中央へ回す） */
+  /** 最終的に旗を刺す場所（カメラはこの地点を中央へ回す＝旗選択時と同じ画角） */
   targetSpot: { x: number; bottom: number };
-  phase: 'walk-across' | 'walk-depth' | 'plant';
+  phase: 'walk' | 'plant';
 }
 
 /* 背景の星空。ホーム(WalkScene)と同じ生成規則で決定的に配置する。ロード画面でも使う。 */
@@ -98,10 +98,10 @@ function sentenceContainsWord(sentence: string, word: string): boolean {
 /** 旗枠内の文章フォント。Maxは現行の上限(1.76rem)、文字数に応じて小さくする */
 function flagScrollFontSize(sentence: string, isMobile = false): string {
   const length = Array.from(sentence).length;
-  const maxRem = isMobile ? 1.12 : 1.76;
-  const minRem = isMobile ? 0.58 : 0.7;
+  const maxRem = isMobile ? 0.78 : 1.76;
+  const minRem = isMobile ? 0.48 : 0.7;
   /** この文字数までは最大サイズのまま収まる想定 */
-  const fitAtMax = isMobile ? 28 : 40;
+  const fitAtMax = isMobile ? 22 : 40;
   if (length <= fitAtMax) {
     return `${maxRem}rem`;
   }
@@ -408,12 +408,12 @@ export function WordLandingExperience({
   };
 
   const focusedFlagPlace = flagFocusSpot
-    ? placeOnSurface(flagFocusSpot.x, flagFocusSpot.bottom, 0, planetRotationDelta)
+    ? placeOnSurface(flagFocusSpot.x, flagFocusSpot.bottom, 0, planetRotationDelta, planetPitchRad)
     : null;
 
   /** 植えモーション中の人の位置。カメラ（星の回転）に乗せて旗の場所へ歩く */
   const personPlantPlace = planting
-    ? placeOnSurface(planting.spot.x, planting.spot.bottom, 0, planetRotationDelta)
+    ? placeOnSurface(planting.spot.x, planting.spot.bottom, 0, planetRotationDelta, planetPitchRad)
     : null;
 
   /** 人物の画面上の立ち位置。意味表示中はジェムの左側（画面左下）へ、
@@ -425,7 +425,7 @@ export function WordLandingExperience({
   const personCurrentX = boarding
     ? 6
     : personPlantPlace
-      ? personPlantPlace.x - 12
+      ? personPlantPlace.x + 32
       : standingAtFlag && focusedFlagPlace
         ? focusedFlagPlace.x + 32
         : rotationPanel === 'meaning' ? -110 : rotationPanel === 'compose' ? personX + 60 : personX;
@@ -458,8 +458,7 @@ export function WordLandingExperience({
   const personIsWalking =
     personWalking
     || boarding
-    || planting?.phase === 'walk-across'
-    || planting?.phase === 'walk-depth'
+    || planting?.phase === 'walk'
     || returningHome;
 
   /** 単語の照射を隠すべきか（旗選択・植えモーション・旗そばにいるあいだ） */
@@ -672,7 +671,7 @@ export function WordLandingExperience({
   };
 
   /** 決定後のモーション（旗までで完結）：
-   * パネルを閉じる（カメラはジェムのまま）→旗の場所へ歩きながら旗が中央になるよう回す
+   * パネルを閉じる → 旗選択時と同じ画角（旗が中央）へ回しながら旗の場所へ歩く
    * →旗を刺す→人は旗の右側に立つ
    */
   const plantFlag = () => {
@@ -686,34 +685,23 @@ export function WordLandingExperience({
       createdAt: new Date().toISOString(),
     };
     const targetSpot = flagSpot(flags.length);
-    // 最初は植え場所と同じ横位置まで歩く。高さはジェム横のまま保ち、ワープに見せない。
-    const acrossWaypoint = {
-      x: targetSpot.x,
-      bottom: surface.surfaceBottom - 30,
-    };
     setSentence('');
     setExpandedFlagId(null);
     setFlagsFocused(false);
     setReturningHome(false);
     // 先に planting を立ててからパネルを閉じる。
-    // これで回転が「ジェム→（ロケットを経由せず）旗」になる
+    // カメラは旗選択時と同じく targetSpot を中央へ向ける（奥へ刺す画角にはしない）
     setPlanting({
       flag: newFlag,
-      spot: acrossWaypoint,
+      spot: targetSpot,
       targetSpot,
-      phase: 'walk-across',
+      phase: 'walk',
     });
     closePanel('compose');
     setPersonWalking(true);
 
     const timers = plantTimersRef.current;
-    // 横移動後、同じx位置のまま斜面を奥行き方向へ縦に歩く
-    timers.push(window.setTimeout(() => {
-      setPlanting((current) =>
-        current ? { ...current, spot: targetSpot, phase: 'walk-depth' } : current,
-      );
-    }, 875));
-    // 刺す動作と同時に旗を確定（この時点で旗はすでに中央付近）
+    // 旗の場所へ歩き着いたら刺す動作と同時に旗を確定し、選択状態にする
     timers.push(window.setTimeout(() => {
       setPlanting((current) => (current ? { ...current, phase: 'plant' } : current));
       sessionPlantedIdsRef.current.add(newFlag.id);
@@ -723,11 +711,20 @@ export function WordLandingExperience({
         return nextFlags;
       });
       setFlagsFocused(true);
-    }, 1375));
-    // 刺し終わったら人はそのまま旗の左側に留まる（ここで植えアクションは終了）
+      setFlagScrollReady(false);
+      setExpandedFlagId(newFlag.id);
+      if (flagScrollTimerRef.current !== null) {
+        window.clearTimeout(flagScrollTimerRef.current);
+      }
+      flagScrollTimerRef.current = window.setTimeout(() => {
+        setFlagScrollReady(true);
+        flagScrollTimerRef.current = null;
+      }, Math.round(FLAG_POLE_EXTEND_DURATION * 1000));
+    }, 900));
+    // 刺し終わったら人はそのまま旗の右側に留まる（選択状態は維持）
     timers.push(window.setTimeout(() => {
       setPlanting(null);
-    }, 2050));
+    }, 1650));
   };
 
   useEffect(
@@ -1859,18 +1856,18 @@ export function WordLandingExperience({
             bottom: -14%;
           }
           .word-landing__planted-scroll {
-            padding: 10px 28px 10px 14px;
-            letter-spacing: .03em;
-            line-height: 1.45;
+            padding: 6px 18px 6px 10px;
+            letter-spacing: .02em;
+            line-height: 1.35;
           }
           .word-landing__planted-delete {
-            right: -30px;
-            width: 24px;
-            height: 24px;
+            right: -26px;
+            width: 20px;
+            height: 20px;
           }
           .word-landing__planted-delete svg {
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
           }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -1983,7 +1980,7 @@ export function WordLandingExperience({
             style={{
               margin: '9px 0 0',
               fontSize: surface.isMobile
-                ? (activePanel === 'meaning' || closingPanel === 'meaning')
+                ? (activePanel !== null || closingPanel !== null)
                   ? 'clamp(1.65rem, 7.5vw, 2.1rem)'
                   : 'clamp(2.85rem, 12vw, 3.6rem)'
                 : 'clamp(2.2rem, 7vw, 4.2rem)',
@@ -2211,11 +2208,17 @@ export function WordLandingExperience({
 
       {(() => {
         // 手前奥方向の回転で乗り越えてきたぶん、フォーカスされたジェムは
-        // 地平線より少し上（星から離れた位置）まで持ち上げる
-        const gemLiftCompose =
-          surface.radius + 28 - toPolar(surface.gemXCompose, surface.gemBottom).radius;
-        const gemLiftMeaning =
-          surface.radius + 28 - toPolar(surface.gemXMeaning, surface.gemBottom).radius;
+        // 地平線より少し上（星から離れた位置）まで持ち上げる。
+        // スマホは画面下寄りを維持するため、持ち上げを控えめにする
+        const gemFocusLift = (gemX: number) => {
+          if (surface.isMobile) {
+            return Math.round(Math.max(100, Math.min(160, surface.vh * 0.18)));
+          }
+          const polarR = toPolar(gemX, surface.gemBottom).radius;
+          return Math.max(0, surface.radius + 28 - polarR);
+        };
+        const gemLiftCompose = gemFocusLift(surface.gemXCompose);
+        const gemLiftMeaning = gemFocusLift(surface.gemXMeaning);
         const leftGemPlace = placeOnSurface(
           -surface.gemXCompose,
           surface.gemBottom,
@@ -2359,14 +2362,17 @@ export function WordLandingExperience({
         );
         const isNew = sessionPlantedIdsRef.current.has(flag.id);
         const flagSizePx = surface.isMobile ? FLAG_SIZE_MOBILE : FLAG_SIZE_DESKTOP;
-        /* 根元固定で3倍伸長したとき、地表から上に見えるポール長 */
-        const expandedPoleH = flagSizePx * (FLAG_EXPAND_POLE_SCALE - 0.5);
+        const expandPoleScale = surface.isMobile
+          ? FLAG_EXPAND_POLE_SCALE_MOBILE
+          : FLAG_EXPAND_POLE_SCALE;
+        /* 根元固定で伸長したとき、地表から上に見えるポール長 */
+        const expandedPoleH = flagSizePx * (expandPoleScale - 0.5);
         /* ポール＋右側の布を覆うヒット領域（布幅0.46・地上に見える高さ〜0.55） */
         const flagHitW = Math.round(flagSizePx * 1.05);
         const flagHitH = Math.round(flagSizePx * 0.58);
         /* 従来の枠（約70px）の3倍。スマホは枠・文字だけ小さく（ポール高は別途維持） */
-        const scrollH = surface.isMobile ? 140 : 210;
-        const scrollW = surface.isMobile ? 'min(220px, 70vw)' : 'min(336px, 86.4vw)';
+        const scrollH = surface.isMobile ? 88 : 210;
+        const scrollW = surface.isMobile ? 'min(140px, 48vw)' : 'min(336px, 86.4vw)';
         /* 奥へ回り込んだ旗は小さく・薄く見せ、十分奥ならクリック不可 */
         const receding = flagPlace.depthZ < -4;
         const flagOpacity = isExpanded ? 1 : receding ? Math.max(0.2, 1 + flagPlace.depthZ / 80) : 1;

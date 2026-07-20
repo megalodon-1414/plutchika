@@ -21,6 +21,8 @@ const WAVE_AMPLITUDE = 0.035;
 const WAVE_SPEED = 3.2;
 /** 選択時のポール伸長倍率 */
 export const FLAG_EXPAND_POLE_SCALE = 3;
+/** スマホ選択時のポール伸長倍率（少し短め） */
+export const FLAG_EXPAND_POLE_SCALE_MOBILE = 2.35;
 
 interface FlagShapesProps {
   color: string;
