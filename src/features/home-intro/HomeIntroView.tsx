@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ROUTES } from '../../routes/paths';
 import {
@@ -50,7 +50,46 @@ export function HomeIntroView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 初回マウント時の復元にのみ使う（以後のURL変化には追従しない）
     [],
   );
-  const { activeIndex, isAnimating, goTo } = useStepGesture(HOME_INTRO_STEPS.length, containerRef, initialIndex);
+
+  // ④搭乗ステップの演出状態。rocketPhase はロケット3D側、boardingStatus は人物・見出しのUI側。
+  const [rocketPhase, setRocketPhase] = useState<RocketPhase>('enter');
+  const [boardingStatus, setBoardingStatus] = useState<'idle' | 'boarding' | 'launching'>('idle');
+  const timersRef = useRef<number[]>([]);
+
+  const clearTimers = () => {
+    timersRef.current.forEach((id) => window.clearTimeout(id));
+    timersRef.current = [];
+  };
+
+  /** 搭乗ステップで下スクロールされたときに搭乗〜発射〜Map遷移を開始する */
+  const startBoardingSequence = useCallback(() => {
+    if (boardingStatus !== 'idle') {
+      return;
+    }
+    // ①人物がロケットまで歩いて乗り込む → ②ロケット発射（上昇→カメラへ向かって飛来）
+    // → ③画面がロケットで埋まったところで感情MAP（telescope）へ遷移
+    setBoardingStatus('boarding');
+    const launchTimerId = window.setTimeout(() => {
+      setBoardingStatus('launching');
+      setRocketPhase('launch');
+      const navigateTimerId = window.setTimeout(() => {
+        navigate(ROUTES.telescopeSpace);
+      }, ROCKET_LAUNCH_TOTAL_MS + 100);
+      timersRef.current.push(navigateTimerId);
+    }, WALKER_BOARD_DURATION_MS);
+    timersRef.current.push(launchTimerId);
+  }, [boardingStatus, navigate]);
+
+  const { activeIndex, isAnimating, goTo } = useStepGesture(
+    HOME_INTRO_STEPS.length,
+    containerRef,
+    initialIndex,
+    {
+      // 搭乗演出中は戻る／進むジェスチャーを受け付けない
+      inputLocked: boardingStatus !== 'idle',
+      onAttemptBeyondEnd: startBoardingSequence,
+    },
+  );
   const activeStep = HOME_INTRO_STEPS[activeIndex];
   const isBoardingStep = activeStep.id === 'boarding';
   const isLogoStep = activeStep.kind === 'logo';
@@ -68,16 +107,6 @@ export function HomeIntroView() {
       setWalkMounted(true);
     }
   }
-
-  // ④搭乗ステップの演出状態。rocketPhase はロケット3D側、boardingStatus は人物・ボタンのUI側。
-  const [rocketPhase, setRocketPhase] = useState<RocketPhase>('enter');
-  const [boardingStatus, setBoardingStatus] = useState<'idle' | 'boarding' | 'launching'>('idle');
-  const timersRef = useRef<number[]>([]);
-
-  const clearTimers = () => {
-    timersRef.current.forEach((id) => window.clearTimeout(id));
-    timersRef.current = [];
-  };
 
   // 搭乗ステップを離れたら演出をリセットし、次回また最初（奥からの登場）から再生する。
   // effect内の同期setStateを避けるため、レンダー中の状態調整パターンで行う。
@@ -100,24 +129,6 @@ export function HomeIntroView() {
     timersRef.current.push(timerId);
     return clearTimers;
   }, [isBoardingStep]);
-
-  const handleBoardClick = () => {
-    if (boardingStatus !== 'idle') {
-      return;
-    }
-    // ①人物がロケットまで歩いて乗り込む → ②ロケット発射（上昇→カメラへ向かって飛来）
-    // → ③画面がロケットで埋まったところで感情MAP（telescope）へ遷移
-    setBoardingStatus('boarding');
-    const launchTimerId = window.setTimeout(() => {
-      setBoardingStatus('launching');
-      setRocketPhase('launch');
-      const navigateTimerId = window.setTimeout(() => {
-        navigate(ROUTES.telescopeSpace);
-      }, ROCKET_LAUNCH_TOTAL_MS + 100);
-      timersRef.current.push(navigateTimerId);
-    }, WALKER_BOARD_DURATION_MS);
-    timersRef.current.push(launchTimerId);
-  };
 
   return (
     <div ref={containerRef} className="home-intro-root">
@@ -152,16 +163,20 @@ export function HomeIntroView() {
           {isBoardingStep && <BoardingRocket phase={rocketPhase} />}
           {isBoardingStep && boardingStatus === 'launching' && <div className="home-intro-launch-dim" />}
           <IntroWalker stepping={isAnimating} boarding={boardingStatus !== 'idle'} />
-          {isBoardingStep && boardingStatus !== 'launching' && (
-            <div className="home-intro-board-cta">
-              <button
-                type="button"
-                className="home-intro-board-cta__button"
-                onClick={handleBoardClick}
-                disabled={boardingStatus !== 'idle'}
-              >
-                感情Mapへ
-              </button>
+          {isBoardingStep && boardingStatus === 'idle' && (
+            <div className="home-intro-board-heading">
+              <p className="home-intro-board-title">
+                さあ、あなたの感情を
+                <br />
+                探しにいきましょう
+              </p>
+              <div className="home-intro-board-scroll-hint" aria-hidden="true">
+                <span className="home-intro-board-scroll-hint__chevrons">
+                  <span className="home-intro-board-scroll-hint__chevron" />
+                  <span className="home-intro-board-scroll-hint__chevron" />
+                </span>
+                <span className="home-intro-board-scroll-hint__label">Scroll to find your mind！</span>
+              </div>
             </div>
           )}
           <NavigationIndicator
