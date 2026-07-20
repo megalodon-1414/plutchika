@@ -7,7 +7,7 @@ import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import { Suspense, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { FlagShapes, FLAG_EXPAND_POLE_SCALE } from './FlagModel';
+import { FlagShapes, FLAG_EXPAND_POLE_SCALE, FLAG_EXPAND_POLE_SCALE_MOBILE } from './FlagModel';
 
 const MOON_OBJ_URL = '/models/Moon_2K.obj';
 
@@ -143,7 +143,7 @@ export interface PlanetFlagInfo {
 
 /** 旗の表示サイズ(px)。ポールの高さに相当し、下半分が星にめり込む */
 export const FLAG_SIZE_DESKTOP = 152;
-export const FLAG_SIZE_MOBILE = 110;
+export const FLAG_SIZE_MOBILE = 96;
 /** 刺した瞬間に地面から生えるアニメーションの長さ(秒) */
 const FLAG_GROW_DURATION = 0.45;
 /** 選択時にポールが3倍まで伸びる時間(秒) */
@@ -157,11 +157,14 @@ function SurfaceFlag({
   accent,
   flag,
   sizePx,
+  expandPoleScale,
   groupRotationZRef,
 }: {
   accent: string;
   flag: PlanetFlagInfo;
   sizePx: number;
+  /** 選択時のポール伸長倍率 */
+  expandPoleScale: number;
   /** SurfaceFlags グループの現在の rotation.z（画面垂直化に使う） */
   groupRotationZRef: MutableRefObject<number>;
 }) {
@@ -213,20 +216,20 @@ function SurfaceFlag({
       wasSelectedRef.current = false;
     }
 
-    // ポール伸長（根元固定で1→3）。閉じるときは3→1
+    // ポール伸長（根元固定）。閉じるときは伸ばした倍率→1
     let nextPole = 1;
     if (reducedMotion) {
-      nextPole = flag.selected ? FLAG_EXPAND_POLE_SCALE : 1;
+      nextPole = flag.selected ? expandPoleScale : 1;
     } else if (expandAtRef.current !== null) {
       const p = Math.min(1, (t - expandAtRef.current) / FLAG_POLE_EXTEND_DURATION);
       const eased = 1 - (1 - p) ** 3;
       if (flag.selected) {
-        nextPole = 1 + (FLAG_EXPAND_POLE_SCALE - 1) * eased;
+        nextPole = 1 + (expandPoleScale - 1) * eased;
       } else {
-        nextPole = FLAG_EXPAND_POLE_SCALE + (1 - FLAG_EXPAND_POLE_SCALE) * eased;
+        nextPole = expandPoleScale + (1 - expandPoleScale) * eased;
       }
     } else if (flag.selected) {
-      nextPole = FLAG_EXPAND_POLE_SCALE;
+      nextPole = expandPoleScale;
     }
     if (Math.abs(nextPole - poleScaleRef.current) > 0.002) {
       poleScaleRef.current = nextPole;
@@ -297,6 +300,8 @@ function SurfaceFlags({
   const rotationZRef = useRef(0);
   const { size } = useThree();
   const flagSizePx = size.width <= 640 ? FLAG_SIZE_MOBILE : FLAG_SIZE_DESKTOP;
+  const expandPoleScale =
+    size.width <= 640 ? FLAG_EXPAND_POLE_SCALE_MOBILE : FLAG_EXPAND_POLE_SCALE;
   const radius = wordPlanetRadius(size.width);
   const depthMaterial = useMemo(
     () =>
@@ -338,6 +343,7 @@ function SurfaceFlags({
             accent={accent}
             flag={flag}
             sizePx={flagSizePx}
+            expandPoleScale={expandPoleScale}
             groupRotationZRef={rotationZRef}
           />
         </group>
