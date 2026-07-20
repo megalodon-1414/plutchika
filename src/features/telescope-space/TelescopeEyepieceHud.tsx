@@ -300,8 +300,8 @@ export function TelescopeInnerTrackLabel({
 
 /**
  * 画面上部のガイドラベル（「今の気持ちは〜の方向／の中でも」）。
- * レンズ径・オーバースキャン・水平シフトの影響を受けないよう、
- * レンズ内ではなく画面座標に固定して表示する。
+ * レンズ径・オーバースキャンの影響は受けないよう画面座標に置くが、
+ * レイヤー4では視野の水平シフト（shiftX）に合わせて左右へ追従する。
  * レイヤー3では「の方向」を出さず、区画に応じた文言を可変部に表示する。
  */
 export function TelescopeGuideLabelHud({
@@ -312,11 +312,14 @@ export function TelescopeGuideLabelHud({
   selectedEmotion = null,
   regionGuideLabel = null,
   regionGuideColor = null,
+  shiftX = '0px',
 }: Omit<TelescopeEyepieceHudProps, 'regionMode'> & {
   regionMode?: boolean;
   /** レイヤー3: 現在区画のガイド文言（例「悲観よりの悲しみ」） */
   regionGuideLabel?: string | null;
   regionGuideColor?: string | null;
+  /** レンズ視野と同じ水平オフセット（レイヤー4で左へずらす） */
+  shiftX?: string;
 }) {
   const emotion = focus.nearest;
   const [detectionShown, setDetectionShown] = useState(false);
@@ -363,18 +366,26 @@ export function TelescopeGuideLabelHud({
         ? 1
         : 0.55;
 
+  const captionSize = 'clamp(0.62rem, 1.85vmin, 0.88rem)';
+  const primarySize =
+    detailMode && !regionMode
+      ? 'clamp(0.88rem, 2.65vmin, 1.18rem)'
+      : 'clamp(1.02rem, 3.55vmin, 1.58rem)';
+  const detectionSize = 'clamp(1.02rem, 3.55vmin, 1.58rem)';
+
   return (
     <div
       aria-live="polite"
       style={{
         position: 'absolute',
         left: '50%',
-        top: 'clamp(72px, 13vh, 150px)',
-        transform: 'translateX(-50%)',
+        top: 'clamp(48px, 10vmin, 132px)',
+        transform: `translateX(calc(-50% + ${shiftX}))`,
+        transition: 'transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 8,
+        gap: 'clamp(3px, 0.9vmin, 6px)',
         opacity: 0.92,
         pointerEvents: 'none',
         zIndex: 2,
@@ -383,7 +394,7 @@ export function TelescopeGuideLabelHud({
       <span
         style={{
           color: 'rgba(244, 236, 247, 0.72)',
-          fontSize: '1.02rem',
+          fontSize: captionSize,
           fontWeight: 550,
           letterSpacing: '0.18em',
           whiteSpace: 'nowrap',
@@ -394,7 +405,7 @@ export function TelescopeGuideLabelHud({
       <span
         style={{
           color: primaryColor,
-          fontSize: detailMode && !regionMode ? '1.4rem' : '1.9rem',
+          fontSize: primarySize,
           fontWeight: 750,
           letterSpacing: '0.14em',
           whiteSpace: 'nowrap',
@@ -410,7 +421,7 @@ export function TelescopeGuideLabelHud({
           style={{
             marginTop: -2,
             color: 'rgba(244, 236, 247, 0.72)',
-            fontSize: '1.02rem',
+            fontSize: captionSize,
             fontWeight: 550,
             letterSpacing: '0.18em',
             whiteSpace: 'nowrap',
@@ -423,7 +434,7 @@ export function TelescopeGuideLabelHud({
         <span
           style={{
             color: detectionColor,
-            fontSize: '1.9rem',
+            fontSize: detectionSize,
             fontWeight: 750,
             letterSpacing: '0.14em',
             whiteSpace: 'nowrap',

@@ -1,17 +1,13 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
-import { getEmotionById } from '../../data/emotions';
 import type { UserPlotRow } from '../../types/userPlot';
-import type { MinimapSyncState } from '../../utils/emotionMinimapLayout';
-import { getTelescopeEmotionWorldPosition } from '../../utils/telescopeMinimapLayout';
 import {
   TELESCOPE_CAMERA_DISTANCE_FAR,
   TELESCOPE_CAMERA_DISTANCE_WIDE,
   TELESCOPE_CAMERA_FOV,
   TELESCOPE_CLICK_DRAG_THRESHOLD_PX,
-  TELESCOPE_GALAXY_RADIUS,
   TELESCOPE_LAYER2_ROTATE_MS,
   TELESCOPE_ORBIT_FOLLOW_MIN_MUL,
   TELESCOPE_ORBIT_FOLLOW_RANGE,
@@ -66,12 +62,10 @@ interface TelescopeSpaceCanvasProps {
   focusBasicId: BasicEmotionId | null;
   selectedDyadId: EmotionId | null;
   wordPlots: readonly UserPlotRow[];
-  viewFocus: TelescopeViewFocus;
   onZoomComplete?: (phase: TelescopeSettledPhase) => void;
   onCanvasClickZoom?: () => void;
   onLayer2RotationComplete?: () => void;
   onViewFocus?: (focus: TelescopeViewFocus) => void;
-  onMinimapSync?: (state: MinimapSyncState | null) => void;
   /** レイヤー3の現在位置インジケータ（画面固定 HUD）との共有状態 */
   regionIndicator?: { current: TelescopeRegionIndicatorState };
   /** レイヤー3の中央検知区画（レイヤー4入口） */
@@ -94,7 +88,6 @@ const TMP_UP = new THREE.Vector3();
 const TMP_FORWARD = new THREE.Vector3();
 const SURVEY_UP = new THREE.Vector3(0, 1, 0);
 const FOCUS_UP = new THREE.Vector3(...TELESCOPE_FOCUS_PLANE_UP);
-const REACT_SYNC_INTERVAL_MS = 1000 / 24;
 
 type CameraMode = 'survey' | 'focus' | 'region' | 'exploration';
 type ZoomInSubPhase =
@@ -215,36 +208,6 @@ function applySurveySpherical(
   camera.lookAt(LOOK_AHEAD);
 }
 
-const _gazeDir = new THREE.Vector3();
-const _gazeHit = new THREE.Vector3();
-
-/**
- * カメラ→注視点の視線と銀河平面(z=0)の交点。
- * ミニマップ用：俯瞰カメラの生座標(z≈28)をマーカーに渡さない。
- */
-function intersectLookWithGalaxyPlane(
-  cameraPosition: THREE.Vector3,
-  lookAt: THREE.Vector3,
-): [number, number, number] {
-  _gazeDir.copy(lookAt).sub(cameraPosition);
-  if (Math.abs(_gazeDir.z) < 1e-6) {
-    return [lookAt.x, lookAt.y, 0];
-  }
-  const t = -cameraPosition.z / _gazeDir.z;
-  if (t < 0.05) {
-    // 背面や極端に近い交点は注視点の XY へフォールバック
-    return [lookAt.x, lookAt.y, 0];
-  }
-  _gazeHit.copy(cameraPosition).addScaledVector(_gazeDir, t);
-  // 環の少し外までに抑え、マーカーが飛んでいかないようにする
-  const maxR = TELESCOPE_GALAXY_RADIUS * 1.35;
-  const r = Math.hypot(_gazeHit.x, _gazeHit.y);
-  if (r > maxR) {
-    const s = maxR / r;
-    return [_gazeHit.x * s, _gazeHit.y * s, 0];
-  }
-  return [_gazeHit.x, _gazeHit.y, 0];
-}
 
 function applyFocusPose(
   camera: THREE.PerspectiveCamera,
@@ -350,7 +313,6 @@ function TelescopeCameraController({
   onLayer2RotationComplete,
   onLayer2ArrivalChange,
   onRegionProgressChange,
-  onCameraStateChange,
 }: {
   zoomPhase: TelescopeZoomPhase;
   focusBasicId: BasicEmotionId | null;
@@ -366,9 +328,6 @@ function TelescopeCameraController({
   /** レイヤー2到着（接近完了）＝バー登場アニメーション開始の合図 */
   onLayer2ArrivalChange?: (arrived: boolean) => void;
   onRegionProgressChange?: (progress: number) => void;
-  onCameraStateChange?: (
-    state: Pick<MinimapSyncState, 'cameraPosition' | 'cameraTarget' | 'cameraUp'>,
-  ) => void;
 }) {
   const { camera, gl } = useThree();
   const mode = useRef<CameraMode>('survey');
@@ -434,13 +393,6 @@ function TelescopeCameraController({
   const rotationCompleteRef = useRef(onLayer2RotationComplete);
   const layer2ArrivalRef = useRef(onLayer2ArrivalChange);
   const regionProgressRef = useRef(onRegionProgressChange);
-  const cameraStateRef = useRef(onCameraStateChange);
-  const lastReactSyncAt = useRef(-Infinity);
-  const lastReportedCamera = useRef<{
-    position: THREE.Vector3;
-    target: THREE.Vector3;
-    up: THREE.Vector3;
-  } | null>(null);
   const currentLookAt = useRef(new THREE.Vector3(...surveyWorldPose(
     TELESCOPE_CAMERA_DISTANCE_FAR,
     0,
@@ -452,56 +404,7 @@ function TelescopeCameraController({
   rotationCompleteRef.current = onLayer2RotationComplete;
   layer2ArrivalRef.current = onLayer2ArrivalChange;
   regionProgressRef.current = onRegionProgressChange;
-  cameraStateRef.current = onCameraStateChange;
   zoomPhaseRef.current = zoomPhase;
-
-  const reportMinimapCamera = (camera: THREE.PerspectiveCamera) => {
-    const onChange = cameraStateRef.current;
-    if (!onChange) {
-      return;
-    }
-
-    const now = performance.now();
-    if (now - lastReactSyncAt.current < REACT_SYNC_INTERVAL_MS) {
-      return;
-    }
-
-    const previous = lastReportedCamera.current;
-    if (
-      previous &&
-      previous.position.distanceToSquared(camera.position) < 1e-8 &&
-      previous.target.distanceToSquared(currentLookAt.current) < 1e-8 &&
-      previous.up.distanceToSquared(camera.up) < 1e-8
-    ) {
-      return;
-    }
-
-    lastReactSyncAt.current = now;
-
-    if (previous) {
-      previous.position.copy(camera.position);
-      previous.target.copy(currentLookAt.current);
-      previous.up.copy(camera.up);
-    } else {
-      lastReportedCamera.current = {
-        position: camera.position.clone(),
-        target: currentLookAt.current.clone(),
-        up: camera.up.clone(),
-      };
-    }
-
-    onChange({
-      // 俯瞰時は視線と銀河平面の交点を「現在地」にし、Layer2 では実カメラ XY を平面へ落とす
-      cameraPosition:
-        mode.current === 'focus' ||
-        mode.current === 'region' ||
-        mode.current === 'exploration'
-          ? [camera.position.x, camera.position.y, 0]
-          : intersectLookWithGalaxyPlane(camera.position, currentLookAt.current),
-      cameraTarget: [0, 0, 0],
-      cameraUp: [0, 1, 0],
-    });
-  };
 
   const beginCloseUpFromRotate = (camera: THREE.PerspectiveCamera) => {
     if (!focusBasicId || !focusBase.current) {
@@ -1126,7 +1029,6 @@ function TelescopeCameraController({
           regionProgress.current = nextProgress;
           regionProgressRef.current?.(nextProgress);
         }
-        reportMinimapCamera(camera);
       } else {
         radius.current = THREE.MathUtils.lerp(
           fromRadius.current,
@@ -1145,7 +1047,6 @@ function TelescopeCameraController({
         targetPhi.current = nextPhi;
         applySurveySpherical(camera, radius.current, theta.current, phi.current);
         currentLookAt.current.copy(LOOK_AHEAD);
-        reportMinimapCamera(camera);
       }
 
       if (progress.current >= 1) {
@@ -1257,7 +1158,6 @@ function TelescopeCameraController({
     }
 
     if (zoomInCameraLock.current) {
-      reportMinimapCamera(camera);
       return;
     }
 
@@ -1268,7 +1168,6 @@ function TelescopeCameraController({
         regionProgress.current,
       );
       currentLookAt.current.copy(TMP_LOOK);
-      reportMinimapCamera(camera);
       return;
     }
 
@@ -1355,7 +1254,6 @@ function TelescopeCameraController({
           hud.plotVisible = false;
         }
       }
-      reportMinimapCamera(camera);
       return;
     }
 
@@ -1367,7 +1265,6 @@ function TelescopeCameraController({
         focusOrbitPitch.current,
       );
       currentLookAt.current.copy(TMP_LOOK);
-      reportMinimapCamera(camera);
       return;
     }
 
@@ -1387,86 +1284,7 @@ function TelescopeCameraController({
     }
     applySurveySpherical(camera, radius.current, theta.current, phi.current);
     currentLookAt.current.copy(LOOK_AHEAD);
-    reportMinimapCamera(camera);
   });
-
-  return null;
-}
-
-function resolveTelescopeMinimapFocus(
-  focusBasicId: BasicEmotionId | null,
-  viewFocus: TelescopeViewFocus,
-): { id: EmotionId; label: string } | null {
-  const candidate = (focusBasicId ?? viewFocus.nearest?.id) as EmotionId | null | undefined;
-  if (!candidate) {
-    return null;
-  }
-
-  const emotion = getEmotionById(candidate);
-  if (!emotion) {
-    return null;
-  }
-
-  return {
-    id: candidate,
-    label: viewFocus.nearest?.id === candidate ? viewFocus.nearest.label : emotion.label,
-  };
-}
-
-function TelescopeMinimapSync({
-  cameraState,
-  focusBasicId,
-  viewFocus,
-  layer2SceneActive,
-  onChange,
-}: {
-  cameraState: Pick<MinimapSyncState, 'cameraPosition' | 'cameraTarget' | 'cameraUp'> | null;
-  focusBasicId: BasicEmotionId | null;
-  viewFocus: TelescopeViewFocus;
-  layer2SceneActive: boolean;
-  onChange?: (state: MinimapSyncState | null) => void;
-}) {
-  useEffect(() => {
-    if (!onChange) {
-      return;
-    }
-
-    if (!cameraState) {
-      onChange(null);
-      return;
-    }
-
-    const relatedLinkBasicId = layer2SceneActive ? focusBasicId : null;
-    const selectedStarPosition =
-      relatedLinkBasicId != null
-        ? getTelescopeEmotionWorldPosition(relatedLinkBasicId)
-        : null;
-    const focus = resolveTelescopeMinimapFocus(focusBasicId, viewFocus);
-    if (!focus) {
-      onChange({
-        ...cameraState,
-        focusPosition: selectedStarPosition,
-        primaryId: null,
-        primaryLabel: null,
-        relatedLinkBasicId,
-      });
-      return;
-    }
-
-    onChange({
-      ...cameraState,
-      focusPosition: selectedStarPosition,
-      primaryId: focus.id,
-      primaryLabel: focus.label,
-      relatedLinkBasicId,
-    });
-  }, [
-    cameraState,
-    focusBasicId,
-    layer2SceneActive,
-    onChange,
-    viewFocus,
-  ]);
 
   return null;
 }
@@ -1678,12 +1496,10 @@ export function TelescopeSpaceCanvas({
   focusBasicId,
   selectedDyadId,
   wordPlots,
-  viewFocus,
   onZoomComplete,
   onCanvasClickZoom,
   onLayer2RotationComplete,
   onViewFocus,
-  onMinimapSync,
   regionIndicator,
   segmentFocus,
   explorationPlotId = null,
@@ -1693,24 +1509,6 @@ export function TelescopeSpaceCanvas({
 }: TelescopeSpaceCanvasProps) {
   const [layer2SceneActive, setLayer2SceneActive] = useState(false);
   const [layer2Arrived, setLayer2Arrived] = useState(false);
-  const [cameraState, setCameraState] = useState<Pick<
-    MinimapSyncState,
-    'cameraPosition' | 'cameraTarget' | 'cameraUp'
-  > | null>(null);
-
-  const handleCameraStateChange = useCallback(
-    (state: Pick<MinimapSyncState, 'cameraPosition' | 'cameraTarget' | 'cameraUp'>) => {
-      setCameraState(state);
-    },
-    [],
-  );
-
-  const handleMinimapSync = useCallback(
-    (state: MinimapSyncState | null) => {
-      onMinimapSync?.(state);
-    },
-    [onMinimapSync],
-  );
 
   useEffect(() => {
     if (
@@ -1758,14 +1556,6 @@ export function TelescopeSpaceCanvas({
         onLayer2SceneChange={setLayer2SceneActive}
         onLayer2RotationComplete={onLayer2RotationComplete}
         onLayer2ArrivalChange={setLayer2Arrived}
-        onCameraStateChange={handleCameraStateChange}
-      />
-      <TelescopeMinimapSync
-        cameraState={cameraState}
-        focusBasicId={focusBasicId}
-        viewFocus={viewFocus}
-        layer2SceneActive={layer2SceneActive}
-        onChange={handleMinimapSync}
       />
       <ambientLight intensity={0.35} />
       <pointLight position={[0, 2, 8]} intensity={1.1} />

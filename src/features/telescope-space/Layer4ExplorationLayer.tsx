@@ -23,13 +23,36 @@ const LABEL_LEADER_GAP_PX = 10;
 const LABEL_LEADER_BASE_PX = 30;
 /** 衝突時に段違いにする1段あたりの追加長（px） */
 const LABEL_LEADER_STEP_PX = 56;
+/** 段違いの上限（これ以上伸ばしても見切れやすい） */
+const LABEL_MAX_LEVEL = 3;
+/** 縦書きラベルの文字サイズ（px） */
+const LABEL_FONT_SIZE_PX = 32;
+/** 画面端との余白（px） */
+const LABEL_VIEWPORT_MARGIN_PX = 28;
 
-type LabelLevelsRef = { current: Map<string, number> };
+type LabelSide = 'up' | 'down';
+type LabelPlacement = { level: number; side: LabelSide };
+type LabelLevelsRef = { current: Map<string, LabelPlacement> };
+
+function estimateVerticalLabelHeightPx(word: string): number {
+  // writing-mode: vertical-rl + letter-spacing 0.1em の概算
+  return Math.max(LABEL_FONT_SIZE_PX, word.length * LABEL_FONT_SIZE_PX * 1.1);
+}
+
+function labelStackExtentPx(level: number, word: string): number {
+  const lineLength = LABEL_LEADER_BASE_PX + level * LABEL_LEADER_STEP_PX;
+  return (
+    LABEL_LEADER_GAP_PX +
+    lineLength +
+    6 +
+    estimateVerticalLabelHeightPx(word)
+  );
+}
 
 /**
  * 表示対象の点を画面座標へ投影して近接クラスタを作り、
- * クラスタ内での引き出し線の段数（0,1,2…）を毎フレーム共有する。
- * 選択中は常に段0（最短）で点のすぐ上に出す。
+ * クラスタ内での引き出し線の段数と上下方向を毎フレーム共有する。
+ * 画面上部で見切れそうなときは下方向へ出す。選択中は常に段0。
  */
 function ExplorationLabelLevelCoordinator({
   plots,
@@ -109,15 +132,82 @@ function ExplorationLabelLevelCoordinator({
     const nextLevels = levels.current;
     nextLevels.clear();
     for (const cluster of clusters.values()) {
-      // 選択中を段0に固定し、他は画面上の並びで安定させて揺れを防ぐ。
+      // 選択中を先頭に固定し、他は画面上の並びで安定させて揺れを防ぐ。
       cluster.sort((a, b) => {
         if (a.id === selectedPlotId) return -1;
         if (b.id === selectedPlotId) return 1;
         return a.screenX - b.screenX || a.id.localeCompare(b.id, 'ja');
       });
-      cluster.forEach((candidate, index) => {
-        nextLevels.set(candidate.id, index);
-      });
+
+      // 上下それぞれ独立に段を積み、上部で見切れる場合は下方向へ逃がす。
+      let upLevel = 0;
+      let downLevel = 0;
+      for (const candidate of cluster) {
+        const spaceAbove = candidate.screenY - LABEL_VIEWPORT_MARGIN_PX;
+        const spaceBelow =
+          size.height - candidate.screenY - LABEL_VIEWPORT_MARGIN_PX;
+        const labelHeight = estimateVerticalLabelHeightPx(candidate.id);
+        const maxLevelFor = (available: number) =>
+          Math.max(
+            0,
+            Math.min(
+              LABEL_MAX_LEVEL,
+              Math.floor(
+                (available -
+                  LABEL_LEADER_GAP_PX -
+                  LABEL_LEADER_BASE_PX -
+                  6 -
+                  labelHeight) /
+                  LABEL_LEADER_STEP_PX,
+              ),
+            ),
+          );
+        const upMax = maxLevelFor(spaceAbove);
+        const downMax = maxLevelFor(spaceBelow);
+        const preferDown =
+          spaceAbove < labelStackExtentPx(0, candidate.id) ||
+          (spaceAbove < spaceBelow &&
+            candidate.screenY < size.height * 0.42);
+
+        const trySide = (
+          side: LabelSide,
+        ): LabelPlacement | null => {
+          const level = side === 'up' ? upLevel : downLevel;
+          const max = side === 'up' ? upMax : downMax;
+          if (level > max) {
+            return null;
+          }
+          if (side === 'up') {
+            upLevel += 1;
+          } else {
+            downLevel += 1;
+          }
+          return { level, side };
+        };
+
+        const primary = preferDown ? 'down' : 'up';
+        const secondary: LabelSide = primary === 'up' ? 'down' : 'up';
+        const placement =
+          trySide(primary) ??
+          trySide(secondary) ??
+          (() => {
+            // どちらも満杯なら余白の多い側へ、段数は上限で打ち切る
+            const side: LabelSide =
+              spaceBelow >= spaceAbove ? 'down' : 'up';
+            const level = Math.min(
+              side === 'up' ? upLevel : downLevel,
+              side === 'up' ? upMax : downMax,
+            );
+            if (side === 'up') {
+              upLevel += 1;
+            } else {
+              downLevel += 1;
+            }
+            return { level, side };
+          })();
+
+        nextLevels.set(candidate.id, placement);
+      }
     }
   }, -1);
 
@@ -148,7 +238,7 @@ function ExplorationPlot({
   const lineRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const nearbyRef = useRef(false);
-  const nowLevel = useRef(0);
+  const nowPlacement = useRef<LabelPlacement>({ level: 0, side: 'up' });
   const color = useMemo(() => plotColorFromRow(plot), [plot]);
   const isSelected = plot.word_id === selectedPlotId;
 
@@ -206,13 +296,31 @@ function ExplorationPlot({
       const shown = isSelected || isNearby;
       leader.style.opacity = shown ? (isSelected ? '1' : '0.9') : '0';
 
-      // 近接クラスタ内では引き出し線を段違いにして重なりを避ける
-      const level = labelLevels.current.get(plot.word_id) ?? 0;
-      if (level !== nowLevel.current) {
-        nowLevel.current = level;
-        const lineLength = LABEL_LEADER_BASE_PX + level * LABEL_LEADER_STEP_PX;
+      // 近接クラスタ内では引き出し線を段違いにし、上部では下方向へ出す
+      const placement = labelLevels.current.get(plot.word_id) ?? {
+        level: 0,
+        side: 'up' as const,
+      };
+      if (
+        placement.level !== nowPlacement.current.level ||
+        placement.side !== nowPlacement.current.side
+      ) {
+        nowPlacement.current = placement;
+        const lineLength =
+          LABEL_LEADER_BASE_PX + placement.level * LABEL_LEADER_STEP_PX;
+        const offset = LABEL_LEADER_GAP_PX + lineLength + 6;
         line.style.height = `${lineLength}px`;
-        label.style.bottom = `${LABEL_LEADER_GAP_PX + lineLength + 6}px`;
+        if (placement.side === 'up') {
+          line.style.bottom = `${LABEL_LEADER_GAP_PX}px`;
+          line.style.top = 'auto';
+          label.style.bottom = `${offset}px`;
+          label.style.top = 'auto';
+        } else {
+          line.style.top = `${LABEL_LEADER_GAP_PX}px`;
+          line.style.bottom = 'auto';
+          label.style.top = `${offset}px`;
+          label.style.bottom = 'auto';
+        }
       }
     }
   });
@@ -259,7 +367,7 @@ function ExplorationPlot({
         </group>
       ) : null}
       <Html center style={{ pointerEvents: 'none' }}>
-        {/* 点を原点として上方向へ: 引き出し線 → 縦書きラベル */}
+        {/* 点を原点として上下どちらかへ: 引き出し線 → 縦書きラベル */}
         <div
           ref={leaderRef}
           aria-hidden
@@ -281,7 +389,8 @@ function ExplorationPlot({
               height: LABEL_LEADER_BASE_PX,
               background: color,
               boxShadow: `0 0 5px ${color}88`,
-              transition: 'height 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+              transition:
+                'height 240ms cubic-bezier(0.22, 0.61, 0.36, 1), top 240ms cubic-bezier(0.22, 0.61, 0.36, 1), bottom 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
             }}
           />
           <div
@@ -295,11 +404,12 @@ function ExplorationPlot({
               writingMode: 'vertical-rl',
               textOrientation: 'upright',
               whiteSpace: 'nowrap',
-              fontSize: 32,
+              fontSize: LABEL_FONT_SIZE_PX,
               letterSpacing: '0.1em',
               color,
               textShadow: '0 0 6px rgba(0,0,0,0.55)',
-              transition: 'bottom 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+              transition:
+                'top 240ms cubic-bezier(0.22, 0.61, 0.36, 1), bottom 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
             }}
           >
             {plot.word_id}
