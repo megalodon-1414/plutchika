@@ -13,15 +13,15 @@ interface NavigationIndicatorProps {
 
 const PREVIOUS_TEXT = 'PREVIOUS';
 /**
- * PREVIOUSの文字が沿うパスの半径（px）。
+ * PREVIOUSの文字が沿うパスの半径（px）。インジケーター全体の1.3倍スケールに合わせてある。
  * ドット・縦線から少し離れた位置にある「ようこそ」等のラベルへ重ならないよう、
- * ラベル手前の余白（ドットトラック半径10px＋gap12px＝22px）より内側に収める。
+ * ラベル手前の余白（ドットトラック半径13px＋gap16px＝29px）より内側に収める。
  */
-const PREVIOUS_TEXT_RADIUS = 15;
+const PREVIOUS_TEXT_RADIUS = 19.5;
 /** 円（ガイドライン）の半径。文字のベースラインより一回り小さくして、文字の後ろ側にぴったり重なるようにする。 */
-const PREVIOUS_RING_RADIUS = 13;
+const PREVIOUS_RING_RADIUS = 16.9;
 /** SVG描画領域の余白（文字の昇り／下がり分の描画スペース）。 */
-const PREVIOUS_SVG_PADDING = 10;
+const PREVIOUS_SVG_PADDING = 13;
 /** 文字を配置する弧の角度範囲・中心角（0deg=右方向、時計回りが正）。円の上側に弧を置く。 */
 const PREVIOUS_ARC_DEGREES = 140;
 const PREVIOUS_ARC_CENTER_DEGREES = 270;

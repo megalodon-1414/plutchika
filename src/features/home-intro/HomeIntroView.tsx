@@ -53,6 +53,21 @@ export function HomeIntroView() {
   const { activeIndex, isAnimating, goTo } = useStepGesture(HOME_INTRO_STEPS.length, containerRef, initialIndex);
   const activeStep = HOME_INTRO_STEPS[activeIndex];
   const isBoardingStep = activeStep.id === 'boarding';
+  const isLogoStep = activeStep.kind === 'logo';
+
+  // ①ロゴ画面 ⇔ 歩行シーンのクロスフェード。切り替わった瞬間に片方を残したまま
+  // opacityをtransitionさせ、完全に透明になった側だけtransitionendでアンマウントする。
+  const [logoMounted, setLogoMounted] = useState(isLogoStep);
+  const [walkMounted, setWalkMounted] = useState(!isLogoStep);
+  const [wasLogoStep, setWasLogoStep] = useState(isLogoStep);
+  if (wasLogoStep !== isLogoStep) {
+    setWasLogoStep(isLogoStep);
+    if (isLogoStep) {
+      setLogoMounted(true);
+    } else {
+      setWalkMounted(true);
+    }
+  }
 
   // ④搭乗ステップの演出状態。rocketPhase はロケット3D側、boardingStatus は人物・ボタンのUI側。
   const [rocketPhase, setRocketPhase] = useState<RocketPhase>('enter');
@@ -106,10 +121,28 @@ export function HomeIntroView() {
 
   return (
     <div ref={containerRef} className="home-intro-root">
-      {activeStep.kind === 'logo' ? (
-        <IntroLogoScreen />
-      ) : (
-        <>
+      {logoMounted && (
+        <div
+          className={`home-intro-crossfade ${isLogoStep ? 'home-intro-crossfade--visible' : 'home-intro-crossfade--hidden'}`}
+          onTransitionEnd={(event) => {
+            if (event.target === event.currentTarget && !isLogoStep) {
+              setLogoMounted(false);
+            }
+          }}
+        >
+          <IntroLogoScreen />
+        </div>
+      )}
+
+      {walkMounted && (
+        <div
+          className={`home-intro-crossfade ${!isLogoStep ? 'home-intro-crossfade--visible' : 'home-intro-crossfade--hidden'}`}
+          onTransitionEnd={(event) => {
+            if (event.target === event.currentTarget && isLogoStep) {
+              setWalkMounted(false);
+            }
+          }}
+        >
           <WalkScene
             stepIndex={activeIndex}
             panelContents={PANEL_CONTENTS}
@@ -136,14 +169,8 @@ export function HomeIntroView() {
             currentIndex={activeIndex - 1}
             onSelect={(index) => goTo(index + 1)}
           />
-        </>
+        </div>
       )}
-
-      <div className="home-intro-progress">
-        <a href="https://plutchika.vercel.app/telescope" className="home-intro-progress__skip">
-          スキップして感情MAPへ
-        </a>
-      </div>
     </div>
   );
 }

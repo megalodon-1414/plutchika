@@ -1,5 +1,8 @@
 :root {
-  --font-family-app: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', sans-serif;
+  /* 本文とその他の文字（Adobe Fonts kit opy5ciw、「TOT-雫花角丸ゴシック StdN」＝CSS上のfont-familyは
+     kitが発行するスラッグ 'tot-shizukardgo-stdn'）。見出し・フッターはtroika-three-textのWebGL描画のため
+     CSSフォントの影響を受けず、別途フォントファイルが必要（momochidori.css参照）。 */
+  --font-family-app: 'tot-shizukardgo-stdn', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', sans-serif;
 }
 
 *,
@@ -22,4 +25,18 @@ body {
   font-family: var(--font-family-app);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 文字のリンクを踏んでページ遷移した直後にフェードインさせる（SiteLayout.tsx参照）。 */
+@keyframes site-page-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.site-page-fade-in {
+  animation: site-page-fade-in 0.4s ease both;
 }

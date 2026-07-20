@@ -77,6 +77,8 @@ interface TextPanelProps {
   rotatingGroupRef: RefObject<THREE.Group | null>;
   /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
   onNavigate?: (path: string) => void;
+  /** 現在の共有ステップ番号。花びらグラフィックの選択リセット判定に使う（PanelLayoutProps参照）。 */
+  stepIndex: number;
 }
 
 /** この角度差を超えたら完全に不可視（cos(diff) がこの値未満） */
@@ -91,12 +93,42 @@ const PANEL_FADE_COS_MAX = 0.7;
 const PANEL_HOOK_Y = 0.84;
 const PANEL_HEADING_Y = 0.74;
 
+/** 花びらグラフィック（必須ルート・深掘りルート共通）を画面内側へ寄せる量（px）。 */
+const PETAL_GRAPHIC_INWARD_SHIFT_PX = 32;
+
+/**
+ * skyHeightに対するこの割合のY位置が、ちょうどキャンバス（画面）の上下中央になる。
+ * オルソグラフィックカメラはワールドY=0を画面の上下中央に投影する。頂点（dy=0）のワールドYは
+ * size.height*(0.5 - HOME_INTRO_HORIZON_RATIO)、skyHeightはsize.height*HOME_INTRO_HORIZON_RATIOなので、
+ * 「ワールドY=0になるdy」をskyHeightで割った割合は 1 - 0.5/HOME_INTRO_HORIZON_RATIO で求まる
+ * （HOME_INTRO_HORIZON_RATIOが変わっても追従する）。
+ */
+const SCREEN_VERTICAL_CENTER_FRACTION = 1 - 0.5 / HOME_INTRO_HORIZON_RATIO;
+
+/**
+ * 必須ルート画面右端固定のNavigationIndicator（home-intro.css .nav-indicator）のジオメトリ。
+ * 本文の右端がこのインジケーターと一定の隙間を保つよう、fraction指定ではなくpx単位で正確に逆算する
+ * （skyWidthの割合だけで位置決めすると、インジケーター自体は画面幅に応じてスケールしないpx固定サイズなので、
+ * 画面幅が変わるたびに隙間が一定にならないため）。NavigationIndicator自身は640px未満で非表示になるので、
+ * この計算も同じ幅未満では適用しない。
+ */
+const NAV_INDICATOR_RIGHT_OFFSET_PX = 24; // .nav-indicator の right
+const NAV_INDICATOR_WIDTH_PX = 182; // .nav-indicator の width（1.3倍後）
+const NAV_INDICATOR_NARROW_BREAKPOINT_PX = 640; // .nav-indicator が非表示になる境界と同じ
+/** 本文とインジケーターの間に空ける隙間（px）。 */
+const NAV_INDICATOR_TEXT_GAP_PX = 24;
+
 interface PanelLayoutProps {
   skyWidth: number;
   skyHeight: number;
   opacity: number;
   /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
   onNavigate?: (path: string) => void;
+  /**
+   * 現在の共有ステップ番号。花びらグラフィックの選択状態は、この値が変わるたび
+   * （進む方向・戻る方向どちらでも）リセットする（PlutchikPetalWheelをkeyで強制再マウントする）。
+   */
+  stepIndex: number;
 }
 
 interface LinkedBodyTextProps {
@@ -192,10 +224,15 @@ function WelcomePanelLayout({
 }: PanelLayoutProps & { content: WelcomePanelContent }) {
   const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.5;
-  const rightX = skyWidth * 0.42;
+  // 本文（右揃え）の右端は、NavigationIndicatorと常に24px空くようpx単位で正確に計算する
+  // （インジケーターが表示される640px以上のときのみ。640px未満は非表示になるため元の比率のままでよい）。
+  const rightX =
+    skyWidth >= NAV_INDICATOR_NARROW_BREAKPOINT_PX
+      ? skyWidth / 2 - (NAV_INDICATOR_RIGHT_OFFSET_PX + NAV_INDICATOR_WIDTH_PX + NAV_INDICATOR_TEXT_GAP_PX)
+      : skyWidth * 0.42;
   const bodyFontSize = skyHeight * 0.026;
   // 折り返し幅を文字数4つ分ほど広げ、「か?」「です。」のような孤立した末尾の1〜2文字が
-  // 単独の行にならないようにする（改行位置＝\nの箇所は変更しない。あくまで自動折り返しの幅だけ広げる）。
+  // 単独の行にならないようにする。
   const rightWidth = skyWidth * 0.48 + bodyFontSize * 8;
   return (
     <>
@@ -270,8 +307,10 @@ function SplitGraphicPanelLayout({
   skyHeight,
   opacity,
   onNavigate,
+  stepIndex,
 }: PanelLayoutProps & { content: SplitGraphicPanelContent }) {
-  const leftX = -skyWidth * 0.46;
+  // 左マージンはようこそパネル（WelcomePanelLayout）と揃える。
+  const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.42;
   return (
     <>
@@ -326,14 +365,23 @@ function SplitGraphicPanelLayout({
         クリックを花びらまで届かせるため pointerEvents は 'auto'（ホイールイベントの伝播はヒットテストと無関係のため、
         スクロールジェスチャーには影響しない）。
       */}
-      <Html center position={[skyWidth * 0.24, skyHeight * 0.52, 0]} style={{ pointerEvents: 'auto' }}>
+      <Html
+        center
+        position={[
+          skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX,
+          skyHeight * SCREEN_VERTICAL_CENTER_FRACTION,
+          0,
+        ]}
+        style={{ pointerEvents: 'auto' }}
+      >
         <div style={{ opacity, transition: 'opacity 0.2s linear', pointerEvents: opacity > 0.5 ? 'auto' : 'none' }}>
           {/*
             PlutchikPetalWheel は既定で maxWidth:100% を付ける。Html のラッパーdivは
             transformのみで明示的な width を持たないため、100%の基準が定まらず幅が0に
             つぶれてしまう。ここでは固定pxで表示したいので maxWidth を打ち消す。
           */}
-          <PlutchikPetalWheel size={PETAL_WHEEL_HTML_SIZE} style={{ maxWidth: 'none' }} />
+          {/* key={stepIndex}：パネルをスクロールして移動したら（進む・戻る方向とも）選択状態をリセットする */}
+          <PlutchikPetalWheel key={stepIndex} size={PETAL_WHEEL_HTML_SIZE} style={{ maxWidth: 'none' }} />
         </div>
       </Html>
     </>
@@ -423,9 +471,9 @@ function SimplePanelLayout({
 }
 
 /** 花2輪を横に並べたサイズ（px）。通常幅／狭い画面（NavigationIndicatorと同じ640px基準）で切り替える。 */
-const DUAL_WHEEL_SIZE = 200;
-const DUAL_WHEEL_SIZE_NARROW = 148;
-const DUAL_WHEEL_GAP = 20;
+const DUAL_WHEEL_SIZE = 240;
+const DUAL_WHEEL_SIZE_NARROW = 110;
+const DUAL_WHEEL_GAP = 16;
 const DUAL_WHEEL_NARROW_BREAKPOINT_PX = 640;
 
 /**
@@ -436,6 +484,9 @@ const DUAL_WHEEL_NARROW_BREAKPOINT_PX = 640;
  * 2輪はそれぞれ独立に1枚ずつ花びらを選択できる（同じ花びらを再クリックで選択解除）。
  * 両方選択されると、円環距離に応じた組み合わせ感情（同じ感情ならピュア感情、対極なら
  * メッセージ）を2輪の下・中央にフェードイン表示する。
+ *
+ * 呼び出し側（TextPanel）がkey={stepIndex}を渡してこのコンポーネントごと強制再マウントする。
+ * パネルをスクロールして移動したら（進む・戻る方向とも）選択状態・組み合わせ結果を丸ごとリセットするため。
  */
 function DualWheelPanelLayout({
   content,
@@ -450,13 +501,18 @@ function DualWheelPanelLayout({
   const isNarrow = skyWidth < DUAL_WHEEL_NARROW_BREAKPOINT_PX;
   const wheelSize = isNarrow ? DUAL_WHEEL_SIZE_NARROW : DUAL_WHEEL_SIZE;
 
-  const textX = isNarrow ? 0 : -skyWidth * 0.46;
-  const textWidth = isNarrow ? skyWidth * 0.82 : skyWidth * 0.42;
+  // 左位置は深掘り「感情ラベリング」パネル（SimplePanelLayoutのleftSideX = -skyWidth*0.42）に揃える。
+  // 右へ寄る分、花びらグラフィックとの間隔を保つため本文の折り返し幅は少し狭める。
+  const textX = isNarrow ? 0 : -skyWidth * 0.42;
+  const textWidth = isNarrow ? skyWidth * 0.94 : skyWidth * 0.38;
   const textAnchorX: 'left' | 'center' = isNarrow ? 'center' : 'left';
 
-  const bodyFontSize = skyHeight * 0.026;
-  const graphicsX = isNarrow ? 0 : skyWidth * 0.24;
-  const graphicsY = isNarrow ? skyHeight * 0.22 : skyHeight * 0.52;
+  // 狭い画面では本文が長く（プレースホルダーの仮テキストが特に長い）折り返し行数がかさむため、
+  // 小さめ・幅広にして行数を抑える。花2輪はさらに下（地平線に立つ人物と重ならない最小限の位置）へ寄せる。
+  const bodyFontSize = isNarrow ? skyHeight * 0.019 : skyHeight * 0.026;
+  // 花2輪＋組み合わせ感情名のグラフィック全体を、さらに左へ48px寄せる。
+  const graphicsX = (isNarrow ? 0 : skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX) - 48;
+  const graphicsY = isNarrow ? skyHeight * 0.14 : skyHeight * SCREEN_VERTICAL_CENTER_FRACTION;
 
   return (
     <>
@@ -520,28 +576,17 @@ function DualWheelPanelLayout({
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: DUAL_WHEEL_GAP }}>
-            <PlutchikPetalWheel
-              size={wheelSize}
-              showLabel={false}
-              style={{ maxWidth: 'none' }}
-              onSelectionChange={setSelectedLeft}
-            />
-            <PlutchikPetalWheel
-              size={wheelSize}
-              showLabel={false}
-              style={{ maxWidth: 'none' }}
-              onSelectionChange={setSelectedRight}
-            />
+            <PlutchikPetalWheel size={wheelSize} style={{ maxWidth: 'none' }} onSelectionChange={setSelectedLeft} />
+            <PlutchikPetalWheel size={wheelSize} style={{ maxWidth: 'none' }} onSelectionChange={setSelectedRight} />
           </div>
           <div
+            key={combined?.name ?? 'none'}
+            className={`dual-wheel-badge${combined ? ' dual-wheel-badge--active' : ''}`}
             style={{
-              fontSize: '1.1em',
-              fontWeight: 600,
-              letterSpacing: '0.06em',
-              minHeight: '1.3em',
-              color: combined?.color ?? '#d8cfe0',
+              fontSize: '2.2em',
+              backgroundColor: combined?.color ?? 'transparent',
               opacity: combined ? 1 : 0,
-              transition: 'opacity 0.3s ease, color 0.3s ease',
+              ...(combined ? ({ '--dual-wheel-glow-color': combined.color } as React.CSSProperties) : {}),
             }}
           >
             {combined?.name ?? ' '}
@@ -567,7 +612,16 @@ function DualWheelPanelLayout({
  * 「現在の共有回転角と、この板固有の角度との差」から毎フレーム導出し、
  * 頂点付近だけなめらかに読める状態になるようにする（板自体を個別にアニメーションさせるものではない）。
  */
-function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupRef, onNavigate }: TextPanelProps) {
+function TextPanel({
+  radius,
+  angle,
+  content,
+  skyWidth,
+  skyHeight,
+  rotatingGroupRef,
+  onNavigate,
+  stepIndex,
+}: TextPanelProps) {
   const [opacity, setOpacity] = useState(0);
   const position: [number, number, number] = [
     0,
@@ -611,6 +665,7 @@ function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupR
             skyHeight={skyHeight}
             opacity={opacity}
             onNavigate={onNavigate}
+            stepIndex={stepIndex}
           />
         )}
         {content.layout === 'split-graphic' && (
@@ -620,13 +675,27 @@ function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupR
             skyHeight={skyHeight}
             opacity={opacity}
             onNavigate={onNavigate}
+            stepIndex={stepIndex}
           />
         )}
         {content.layout === 'simple' && (
-          <SimplePanelLayout content={content} skyWidth={skyWidth} skyHeight={skyHeight} opacity={opacity} />
+          <SimplePanelLayout
+            content={content}
+            skyWidth={skyWidth}
+            skyHeight={skyHeight}
+            opacity={opacity}
+            stepIndex={stepIndex}
+          />
         )}
         {content.layout === 'dual-wheel' && (
-          <DualWheelPanelLayout content={content} skyWidth={skyWidth} skyHeight={skyHeight} opacity={opacity} />
+          <DualWheelPanelLayout
+            key={stepIndex}
+            content={content}
+            skyWidth={skyWidth}
+            skyHeight={skyHeight}
+            opacity={opacity}
+            stepIndex={stepIndex}
+          />
         )}
       </group>
     </group>
@@ -720,6 +789,7 @@ function PlanetMesh({
             skyHeight={skyHeight}
             rotatingGroupRef={rotatingRef}
             onNavigate={onNavigate}
+            stepIndex={stepIndex}
           />
         ))}
       </group>
