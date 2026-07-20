@@ -11,6 +11,7 @@ import { PlanetSphere, PlantedFlagsLayer, wordPlanetRadius, wordPlanetHorizonRat
 import { FLAG_EXPAND_POLE_SCALE, FLAG_EXPAND_POLE_SCALE_MOBILE } from './FlagModel';
 import { RocketModel, ROCKET_TAKEOFF_TOTAL_MS } from './RocketModel';
 import { buildTelescopeRestoreState } from '../telescope-space/telescopeRestore';
+import { useAppCornerMenuExtras } from '../../components/site/AppCornerMenu';
 
 /** Mapに戻る：人物がロケットへ歩いて乗り込む時間（CSSの personBoard と一致） */
 const PERSON_BOARD_MS = 900;
@@ -435,7 +436,7 @@ export function WordLandingExperience({
   const personBottom = boarding
     ? surface.surfaceBottom
     : personPlantPlace
-      ? personPlantPlace.bottom - 20
+      ? personPlantPlace.bottom - 6
       : standingAtFlag && focusedFlagPlace
         ? focusedFlagPlace.bottom - 20
         : rotationPanel !== null
@@ -598,6 +599,15 @@ export function WordLandingExperience({
       startLaunch();
     }, PERSON_BOARD_MS);
   };
+
+  useAppCornerMenuExtras('word-landing', [
+    {
+      id: 'return-to-map',
+      label: 'Mapに戻る',
+      onClick: handleReturnToMap,
+      disabled: boarding || takingOff,
+    },
+  ]);
 
   useEffect(() => {
     return () => {
@@ -802,23 +812,11 @@ export function WordLandingExperience({
           inset: 22px 24px auto;
           z-index: 5;
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-start;
           align-items: flex-start;
           gap: 16px;
+          pointer-events: none;
           animation: uiReveal .5s ease-out calc(var(--landing-time) + .3s) both;
-        }
-        .word-landing__header-back {
-          padding: 8px 13px;
-          border-radius: 8px;
-          font: inherit;
-          font-size: 0.76rem;
-          letter-spacing: 0.06em;
-          cursor: pointer;
-          backdrop-filter: blur(8px);
-        }
-        .word-landing__header-back:disabled {
-          opacity: 0.55;
-          cursor: default;
         }
         /* Map遷移時：離陸の終盤で黒へフェードアウト */
         .word-landing__exit-fade {
@@ -1286,7 +1284,7 @@ export function WordLandingExperience({
             transform: rotate(22deg);
           }
         }
-        /* 旗を刺す動作：前かがみになり、持っている旗を地面へ突き立てる。
+        /* 旗を刺す動作：左に前かがみになり、左手の旗を地面へ突き立てる。
            personArrive をリストに残したまま追加する（外したときに登場アニメーションが
            再実行されて人が消えるのを防ぐ） */
         .word-landing__person.is-planting {
@@ -1299,18 +1297,24 @@ export function WordLandingExperience({
             transform: translateX(-50%) rotate(0deg) translateY(0);
           }
           40%, 62% {
-            transform: translateX(-50%) rotate(22deg) translateY(14px) scale(1.06);
+            transform: translateX(-50%) rotate(-22deg) translateY(14px) scale(1.06);
           }
         }
         .word-landing__person.is-planting .word-landing__person-held-flag {
+          left: 6px;
           animation: personPlantFlag .9s ease-in-out both;
+        }
+        .word-landing__person.is-planting .word-landing__person-held-flag::after {
+          left: auto;
+          right: 2px;
+          clip-path: polygon(100% 0, 0 10%, 16% 50%, 0 90%, 100% 100%);
         }
         @keyframes personPlantFlag {
           0%, 100% {
-            transform: rotate(28deg) translateY(0) scale(1);
+            transform: rotate(-28deg) translateY(0) scale(1);
           }
           40%, 62% {
-            transform: rotate(-6deg) translateY(22px) scale(1.18);
+            transform: rotate(6deg) translateY(22px) scale(1.18);
           }
         }
         .word-landing__person-held-flag {
@@ -1938,19 +1942,6 @@ export function WordLandingExperience({
             /telescope/{getEmotionWordSlug(plot)}
           </p>
         </div>
-        <button
-          type="button"
-          className="word-landing__header-back"
-          onClick={handleReturnToMap}
-          disabled={boarding || takingOff}
-          style={{
-            border: `1px solid ${uiTheme.accentBorder}`,
-            color: uiTheme.textPrimary,
-            background: uiTheme.panelBackground,
-          }}
-        >
-          Map に戻る
-        </button>
       </header>
 
       {takingOff && <div className="word-landing__exit-fade" aria-hidden />}

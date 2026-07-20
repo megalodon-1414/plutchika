@@ -1,6 +1,6 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { ROUTES } from '../../routes/paths';
-import { AppCornerMenu } from './AppCornerMenu';
+import { AppCornerMenu, AppCornerMenuProvider } from './AppCornerMenu';
 
 interface SiteLayoutProps {
   /** 感情MAP用のフルスクリーンレイアウトでは false */
@@ -14,15 +14,17 @@ export function SiteLayout({ showSiteChrome = true }: SiteLayoutProps) {
     // key={location.pathname}でページ遷移のたびに新しいDOMノードとして再マウントし、
     // fade-inアニメーション（index.cssのsite-page-fade-in）を毎回再生させる。
     return (
-      <div
-        key={location.pathname}
-        className="site-page-fade-in"
-        style={{ height: '100%', position: 'relative' }}
-      >
-        <Outlet />
-        {/* 望遠鏡と同じ右上メニューをメイン画面系でも共通表示 */}
-        <AppCornerMenu />
-      </div>
+      <AppCornerMenuProvider>
+        <div
+          key={location.pathname}
+          className="site-page-fade-in"
+          style={{ height: '100%', position: 'relative' }}
+        >
+          <Outlet />
+          {/* 望遠鏡と同じ右上メニューをメイン画面系でも共通表示 */}
+          <AppCornerMenu />
+        </div>
+      </AppCornerMenuProvider>
     );
   }
 

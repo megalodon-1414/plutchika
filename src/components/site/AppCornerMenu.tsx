@@ -1,8 +1,109 @@
-import { useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { Link } from 'react-router-dom';
 import { ROUTES } from '../../routes/paths';
 
 const LINE_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+
+const menuItemStyle: CSSProperties = {
+  display: 'block',
+  padding: '6px 2px',
+  color: 'rgba(244, 236, 247, 0.88)',
+  textDecoration: 'none',
+  fontSize: '0.72rem',
+  letterSpacing: '0.1em',
+  fontWeight: 550,
+  whiteSpace: 'nowrap',
+  textShadow: '0 1px 8px rgba(0,0,0,0.7)',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  font: 'inherit',
+  textAlign: 'right',
+};
+
+export interface AppCornerMenuExtraItem {
+  id: string;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+interface AppCornerMenuExtrasContextValue {
+  setExtraItems: (ownerId: string, items: AppCornerMenuExtraItem[]) => void;
+  clearExtraItems: (ownerId: string) => void;
+  extraItems: AppCornerMenuExtraItem[];
+}
+
+const AppCornerMenuExtrasContext = createContext<AppCornerMenuExtrasContextValue | null>(null);
+
+/** フルスクリーン画面で右上メニューの追加項目を共有する */
+export function AppCornerMenuProvider({ children }: { children: ReactNode }) {
+  const [byOwner, setByOwner] = useState<Record<string, AppCornerMenuExtraItem[]>>({});
+
+  const setExtraItems = useCallback((ownerId: string, items: AppCornerMenuExtraItem[]) => {
+    setByOwner((current) => ({ ...current, [ownerId]: items }));
+  }, []);
+
+  const clearExtraItems = useCallback((ownerId: string) => {
+    setByOwner((current) => {
+      if (!(ownerId in current)) return current;
+      const next = { ...current };
+      delete next[ownerId];
+      return next;
+    });
+  }, []);
+
+  const extraItems = useMemo(
+    () => Object.values(byOwner).flat(),
+    [byOwner],
+  );
+
+  const value = useMemo(
+    () => ({ setExtraItems, clearExtraItems, extraItems }),
+    [setExtraItems, clearExtraItems, extraItems],
+  );
+
+  return (
+    <AppCornerMenuExtrasContext.Provider value={value}>
+      {children}
+    </AppCornerMenuExtrasContext.Provider>
+  );
+}
+
+/** 単語着陸などから「Mapに戻る」などの追加メニューを登録する */
+export function useAppCornerMenuExtras(
+  ownerId: string,
+  items: AppCornerMenuExtraItem[],
+) {
+  const ctx = useContext(AppCornerMenuExtrasContext);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const signature = items
+    .map((item) => `${item.id}\0${item.label}\0${item.disabled ? 1 : 0}`)
+    .join('\n');
+
+  useEffect(() => {
+    if (!ctx) return;
+    const wrapped = itemsRef.current.map((item) => ({
+      ...item,
+      onClick: () => {
+        itemsRef.current.find((entry) => entry.id === item.id)?.onClick();
+      },
+    }));
+    ctx.setExtraItems(ownerId, wrapped);
+    return () => ctx.clearExtraItems(ownerId);
+  }, [ctx, ownerId, signature]);
+}
 
 /**
  * 右上ハンバーガーメニュー（Home など）。
@@ -11,6 +112,8 @@ const LINE_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 export function AppCornerMenu() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const extrasCtx = useContext(AppCornerMenuExtrasContext);
+  const extraItems = extrasCtx?.extraItems ?? [];
 
   useEffect(() => {
     if (!open) {
@@ -170,16 +273,7 @@ export function AppCornerMenu() {
           tabIndex={open ? 0 : -1}
           onClick={() => setOpen(false)}
           style={{
-            display: 'block',
-            padding: '6px 2px',
-            color: 'rgba(244, 236, 247, 0.88)',
-            textDecoration: 'none',
-            fontSize: '0.72rem',
-            letterSpacing: '0.1em',
-            fontWeight: 550,
-            whiteSpace: 'nowrap',
-            textShadow: '0 1px 8px rgba(0,0,0,0.7)',
-            background: 'transparent',
+            ...menuItemStyle,
             animation: open
               ? `appCornerMenuItemIn 360ms ${LINE_EASING} both`
               : 'none',
@@ -187,6 +281,30 @@ export function AppCornerMenu() {
         >
           Home
         </Link>
+        {extraItems.map((item, index) => (
+          <button
+            key={item.id}
+            type="button"
+            role="menuitem"
+            tabIndex={open && !item.disabled ? 0 : -1}
+            disabled={item.disabled}
+            onClick={() => {
+              if (item.disabled) return;
+              setOpen(false);
+              item.onClick();
+            }}
+            style={{
+              ...menuItemStyle,
+              opacity: item.disabled ? 0.45 : 1,
+              cursor: item.disabled ? 'default' : 'pointer',
+              animation: open
+                ? `appCornerMenuItemIn 360ms ${LINE_EASING} ${(index + 1) * 40}ms both`
+                : 'none',
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
     </div>
   );
