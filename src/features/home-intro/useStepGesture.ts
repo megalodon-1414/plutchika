@@ -6,6 +6,19 @@ const GESTURE_LOCK_MS = 750;
 const WHEEL_DELTA_THRESHOLD = 10;
 const TOUCH_DELTA_THRESHOLD = 32;
 
+export interface UseStepGestureOptions {
+  /**
+   * true の間はホイール／タッチ／キーによるステップ切替をすべて無視する。
+   * 搭乗〜発射演出中など、途中で戻られないようにしたいときに使う。
+   */
+  inputLocked?: boolean;
+  /**
+   * 最終ステップでさらに「次へ」ジェスチャーされたときに呼ばれる。
+   * 搭乗ステップからのMap遷移トリガーなどに使う。
+   */
+  onAttemptBeyondEnd?: () => void;
+}
+
 export interface UseStepGestureResult {
   activeIndex: number;
   /** ステップ切り替えアニメーション中は true */
@@ -24,6 +37,7 @@ export function useStepGesture(
   stepCount: number,
   containerRef: RefObject<HTMLElement | null>,
   initialIndex = 0,
+  options: UseStepGestureOptions = {},
 ): UseStepGestureResult {
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -31,14 +45,28 @@ export function useStepGesture(
   const lockedRef = useRef(false);
   const touchStartYRef = useRef<number | null>(null);
   const lockTimerRef = useRef<number | null>(null);
+  // 毎回のレンダーで最新の options を参照するための ref（リスナー再登録を避ける）
+  const inputLockedRef = useRef(Boolean(options.inputLocked));
+  const onAttemptBeyondEndRef = useRef(options.onAttemptBeyondEnd);
+  useEffect(() => {
+    inputLockedRef.current = Boolean(options.inputLocked);
+    onAttemptBeyondEndRef.current = options.onAttemptBeyondEnd;
+  }, [options.inputLocked, options.onAttemptBeyondEnd]);
 
   const step = useCallback(
     (direction: 1 | -1) => {
-      if (lockedRef.current) {
+      if (lockedRef.current || inputLockedRef.current) {
         return;
       }
       const next = activeIndexRef.current + direction;
-      if (next < 0 || next >= stepCount) {
+      if (next < 0) {
+        return;
+      }
+      if (next >= stepCount) {
+        // 最終ステップでさらに「次へ」→ Map遷移など、呼び出し側のハンドラへ委譲
+        if (direction === 1) {
+          onAttemptBeyondEndRef.current?.();
+        }
         return;
       }
 
@@ -60,7 +88,13 @@ export function useStepGesture(
 
   const goTo = useCallback(
     (index: number) => {
-      if (lockedRef.current || index < 0 || index >= stepCount || index === activeIndexRef.current) {
+      if (
+        lockedRef.current ||
+        inputLockedRef.current ||
+        index < 0 ||
+        index >= stepCount ||
+        index === activeIndexRef.current
+      ) {
         return;
       }
       lockedRef.current = true;
