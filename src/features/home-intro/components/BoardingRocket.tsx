@@ -42,7 +42,8 @@ export const ROCKET_ENTER_DURATION_MS = ENTER_DURATION_S * 1000;
 export const ROCKET_LAUNCH_TOTAL_MS = (ASCEND_DURATION_S + TURN_PAUSE_S + DIVE_DURATION_S) * 1000;
 
 const BODY_COLOR = '#e4d9ea';
-const ACCENT_COLOR = '#8f231c';
+/** フィン・ノーズなど、OBJの 'red' マテリアル（アクセント）に使うグレー。 */
+const ACCENT_COLOR = '#7a7685';
 const FLAME_COLOR = '#3d8bff';
 const FLAME_CORE_COLOR = '#eef6ff';
 
@@ -61,7 +62,7 @@ function easeInQuint(t: number): number {
 
 /**
  * OBJに付属のMTLは同梱していないため、マテリアル名（usemtl）を手掛かりに
- * サイト共通のトゥーン調パレットへ塗り替える（'red' 系＝フィン・ノーズをアクセント色に）。
+ * サイト共通のトゥーン調パレットへ塗り替える（'red' 系＝フィン・ノーズ・窓リングをアクセントのグレーに）。
  */
 function applyToonMaterials(root: THREE.Group) {
   root.traverse((child) => {
@@ -206,8 +207,12 @@ export function BoardingRocket({ phase }: BoardingRocketProps) {
       camera={{ position: [0, 0, 2000], near: 1, far: 10000, zoom: 1 }}
       gl={{ alpha: true, antialias: true }}
       dpr={[1, 2]}
+      onCreated={({ gl }) => {
+        // 下の惑星・星空を透かして見せるため、クリア色のアルファを0にする（未設定だと不透明白で覆うことがある）
+        gl.setClearColor(0x000000, 0);
+      }}
       /* 暗転レイヤー（.home-intro-launch-dim、z-index:6）より下に置き、発射中はロケットごと暗くなるようにする */
-      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 4 }}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 4, background: 'transparent' }}
     >
       <ambientLight intensity={0.75} />
       <directionalLight position={[0.4, 1, 1]} intensity={1} />
