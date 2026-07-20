@@ -7,7 +7,8 @@ import type { EmotionUiTheme } from '../../utils/emotionUiTheme';
 import { getEmotionWordSlug } from '../../utils/emotionWordSlug';
 import { wordTypeLabel } from '../../utils/emotionWordsBridge';
 import { OctahedronIcon } from './OctahedronIcon';
-import { PlanetSphere, wordPlanetRadius } from './PlanetSphere';
+import { PlanetSphere, wordPlanetRadius, FLAG_POLE_EXTEND_DURATION, FLAG_SIZE_DESKTOP, FLAG_SIZE_MOBILE } from './PlanetSphere';
+import { FLAG_EXPAND_POLE_SCALE } from './FlagModel';
 import { RocketModel } from './RocketModel';
 
 interface WordLandingExperienceProps {
@@ -90,14 +91,30 @@ function sentenceContainsWord(sentence: string, word: string): boolean {
   return sentence.includes(word);
 }
 
+/** 旗枠内の文章フォント。Maxは現行の上限(1.76rem)、文字数に応じて小さくする */
+function flagScrollFontSize(sentence: string): string {
+  const length = Array.from(sentence).length;
+  const maxRem = 1.76;
+  const minRem = 0.7;
+  /** この文字数までは最大サイズのまま収まる想定 */
+  const fitAtMax = 40;
+  if (length <= fitAtMax) {
+    return `${maxRem}rem`;
+  }
+  const rem = Math.max(minRem, maxRem * (fitAtMax / length));
+  return `${rem.toFixed(3)}rem`;
+}
+
 function GemButtonContent({
   label,
   color,
   selected = false,
+  size = 150,
 }: {
   label: string;
   color: string;
   selected?: boolean;
+  size?: number;
 }) {
   return (
     <>
@@ -106,7 +123,7 @@ function GemButtonContent({
         className={`word-landing__choice-gem${selected ? ' is-selected' : ''}`}
         aria-hidden
       >
-        <OctahedronIcon color={color} size={150} active={selected} />
+        <OctahedronIcon color={color} size={size} active={selected} />
       </span>
       {!selected && <span className="word-landing__choice-bubble">{label}</span>}
     </>
@@ -124,6 +141,9 @@ export function WordLandingExperience({
   const [sentence, setSentence] = useState('');
   const [flags, setFlags] = useState<PlantedFlag[]>([]);
   const [expandedFlagId, setExpandedFlagId] = useState<string | null>(null);
+  /** ポール伸長が終わり、巻物の文章枠を出してよいか */
+  const [flagScrollReady, setFlagScrollReady] = useState(false);
+  const flagScrollTimerRef = useRef<number | null>(null);
   const [activePanel, setActivePanel] = useState<LandingPanel | null>(null);
   const [closingPanel, setClosingPanel] = useState<LandingPanel | null>(null);
   const [beamReady, setBeamReady] = useState(false);
@@ -145,18 +165,47 @@ export function WordLandingExperience({
   const composition = useMemo(() => compositionLine(plot), [plot]);
 
   // 星（球体）の上に立つオブジェクトの配置。惑星中心まわりの極座標で管理し、
-  // 球体の回転に合わせて位置と傾きを一緒に動かす
+  // 球体の回転に合わせて位置と傾きを一緒に動かす。リサイズでスマホ幅にも追従する
+  const [viewport, setViewport] = useState(() => ({
+    vw: typeof window !== 'undefined' ? window.innerWidth : 1024,
+    vh: typeof window !== 'undefined' ? window.innerHeight : 800,
+  }));
+  useEffect(() => {
+    const onResize = () => {
+      setViewport({ vw: window.innerWidth, vh: window.innerHeight });
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   const surface = useMemo(() => {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const { vw, vh } = viewport;
     const radius = wordPlanetRadius(vw);
     const surfaceBottom = 0.2 * vh; // CSSの --surface-bottom: 20% と対
     const centerBottom = surfaceBottom - radius; // 惑星中心のbottom座標(px)
-    /* ジェムは画面下部、中央と両端の間くらい（星の斜面上）に置く */
-    const gemX = vw * (vw <= 640 ? 0.25 : 0.28); // 中央からの水平オフセット
-    const gemBottom = 0.06 * vh;
-    return { vw, vh, radius, surfaceBottom, centerBottom, gemX, gemBottom };
-  }, []);
+    const isMobile = vw <= 640;
+    /* 表示領域に合わせてジェムサイズを変える（狭い画面でも最低112、広い画面は最大200） */
+    const gemSize = Math.round(Math.min(200, Math.max(112, vw * 0.145)));
+    const gemHalf = gemSize / 2;
+    /* ジェムは画面内・星の弧上に収まる範囲で、できるだけ外側へ置く */
+    const desiredGemX = vw * (isMobile ? 0.26 : 0.36);
+    const maxByViewport = vw / 2 - gemHalf - (isMobile ? 8 : 16);
+    const maxBySphere = radius * (isMobile ? 0.4 : 0.55);
+    const gemX = Math.max(36, Math.min(desiredGemX, maxByViewport, maxBySphere));
+    /* 星の円弧上に載せる（画面外や星から浮くのを防ぐ） */
+    const gemBottom = centerBottom + Math.sqrt(Math.max(0, radius ** 2 - gemX ** 2));
+    return {
+      vw,
+      vh,
+      radius,
+      surfaceBottom,
+      centerBottom,
+      gemX,
+      gemBottom,
+      gemSize,
+      isMobile,
+    };
+  }, [viewport]);
 
   /** 画面上の位置(中心からのx, bottom) → 惑星中心まわりの角度(時計回り正)と距離 */
   const toPolar = (x: number, bottomPx: number) => {
@@ -168,7 +217,7 @@ export function WordLandingExperience({
   //   1) ジェムが押されたら照射を「角度が狭まり一本の線→引っ込む」で閉じ、単語名も消す（0.6s）
   //   2) 閉じ終わってから星の回転を開始する（rotationPanelを遅れて反映）
   //   3) 回転が落ち着いてから、ジェム（星の中央）から「線が伸びる→角度が広がる」で照射を開く
-  // 閉じるときも同じ順序で、最後に単語への照射へ戻る
+  // 閉じるときも同じ順序で、ロケット／画角が戻ってから単語への照射へ戻る
   const [beamPhase, setBeamPhase] = useState<'word' | 'off' | 'panel'>('word');
   /** 回転を駆動するパネル状態。activePanelから照射の消灯アニメーションぶん遅れて追従する */
   const [rotationPanel, setRotationPanel] = useState<LandingPanel | null>(null);
@@ -176,8 +225,24 @@ export function WordLandingExperience({
   const [beamOffMode, setBeamOffMode] = useState<LandingPanel | null>(null);
   /** 一度でもパネル開閉を経たか。初回着陸の照射と、パネルを閉じたあとの再照射を区別する */
   const [beamCycled, setBeamCycled] = useState(false);
+  /** 旗／ジェムからの復帰中、画角が戻るまで単語照射を抑止する */
+  const [wordBeamSuppressed, setWordBeamSuppressed] = useState(false);
+  const wordBeamSuppressTimerRef = useRef<number | null>(null);
   const beamPhaseInitRef = useRef(true);
   const prevPanelRef = useRef<LandingPanel | null>(null);
+
+  /** 星の回転が落ち着くまで単語照射を遅らせる（着陸初回には使わない） */
+  const suppressWordBeamUntilSettled = () => {
+    setWordBeamSuppressed(true);
+    if (wordBeamSuppressTimerRef.current !== null) {
+      window.clearTimeout(wordBeamSuppressTimerRef.current);
+    }
+    wordBeamSuppressTimerRef.current = window.setTimeout(() => {
+      setWordBeamSuppressed(false);
+      wordBeamSuppressTimerRef.current = null;
+    }, 1100);
+  };
+
   useEffect(() => {
     if (beamPhaseInitRef.current) {
       beamPhaseInitRef.current = false;
@@ -189,9 +254,11 @@ export function WordLandingExperience({
     setBeamCycled(true);
     setBeamPhase('off');
     const rotateTimer = window.setTimeout(() => setRotationPanel(activePanel), 180);
+    // 単語へ戻るときは星／ロケットの移動が終わってから照射を再開する
+    const beamDelay = activePanel !== null ? 950 : 1400;
     const beamTimer = window.setTimeout(
       () => setBeamPhase(activePanel !== null ? 'panel' : 'word'),
-      950,
+      beamDelay,
     );
     return () => {
       window.clearTimeout(rotateTimer);
@@ -210,13 +277,30 @@ export function WordLandingExperience({
   const surfaceCircleBottom = (x: number) =>
     surface.centerBottom + Math.sqrt(Math.max(0, surface.radius ** 2 - x ** 2));
 
-  /** 旗を刺す場所。ロケット（星の中央）の左側に、旗ごとに少しずつずらして並べる */
+  /** 旗を刺す場所。
+   * 1本目はロケット左、2本目は右（奥行き＝|x|は1本目と同じ）。
+   * 3本目以降は左右交互に少しずつずらす。スマホでは星の半径に合わせて縮める */
   const flagSpot = (index: number) => {
+    const scale = Math.min(1, surface.radius / 520);
+    const maxOffset = surface.radius * (surface.isMobile ? 0.36 : 0.5);
+    const firstOffset = Math.min(maxOffset, 240 * scale);
+
+    if (index === 0) {
+      const x = -firstOffset;
+      return { x, bottom: surfaceCircleBottom(x) };
+    }
+    if (index === 1) {
+      const x = firstOffset;
+      return { x, bottom: surfaceCircleBottom(x) };
+    }
+
+    const pair = Math.floor(index / 2);
     const steps = [0, 38, 76, 19, 57, 95] as const;
-    const step = steps[index % steps.length];
-    const row = Math.floor(index / steps.length) % 3;
-    const x = -240 - step;
-    return { x, bottom: surfaceCircleBottom(x) + row * 8 };
+    const step = steps[pair % steps.length];
+    const row = Math.floor(pair / steps.length) % 3;
+    const offset = Math.min(maxOffset, (240 + step) * scale);
+    const x = index % 2 === 0 ? -offset : offset;
+    return { x, bottom: surfaceCircleBottom(x) + row * 6 * scale };
   };
 
   /** クリックで開いている旗のインデックス。通常時はこの旗を星の中央へ回す */
@@ -237,13 +321,21 @@ export function WordLandingExperience({
   const flagFocusAngle = flagFocusSpot
     ? toPolar(flagFocusSpot.x, flagFocusSpot.bottom).angle
     : 0;
-  /** 惑星全体の回転。ジェム選択時はジェムへ、植え〜旗フォーカス中は旗へ合わせる */
-  const planetRotationDelta =
-    rotationPanel !== null ? rotationDelta : flagFocusSpot ? -flagFocusAngle : 0;
+  /** 惑星全体の回転。
+   * 旗を選択中／植えモーション中は旗を中央に（ジェム選択中でも旗を優先）。
+   * それ以外でジェム選択中ならジェムへ。刺しあとの旗フォーカスも旗へ合わせる */
+  const flagCameraActive = planting !== null || expandedFlagIndex >= 0;
+  const planetRotationDelta = flagCameraActive && flagFocusSpot
+    ? -flagFocusAngle
+    : rotationPanel !== null
+      ? rotationDelta
+      : flagFocusSpot
+        ? -flagFocusAngle
+        : 0;
   const planetPitchRad = rotationPanel !== null || flagFocusSpot !== null ? -0.22 : 0;
 
   /** 基準位置を球体の回転ぶんだけ回した配置（位置＋傾き）を返す。liftPxで半径方向に浮かせられる */
-  const placeOnSurface = (x: number, bottomPx: number, liftPx = 0, yaw = rotationDelta) => {
+  const placeOnSurface = (x: number, bottomPx: number, liftPx = 0, yaw = planetRotationDelta) => {
     const p = toPolar(x, bottomPx);
     const a = p.angle + yaw;
     const r = p.radius + liftPx;
@@ -271,14 +363,18 @@ export function WordLandingExperience({
     : flagsFocused && focusedFlagPlace
       ? focusedFlagPlace.x - 12
       : rotationPanel === 'meaning' ? -110 : rotationPanel === 'compose' ? personX + 60 : personX;
-  /** 人物の足元の高さ。植えに行くとき／旗フォーカス時は斜面（円弧）上に立つ */
+  /** 人物の足元の高さ。
+   * 旗選択中・植え後フォーカス中は、刺さった旗の根元に合わせて一段下げる
+   * （expandedFlagId だけでは flagsFocused が立たないため、選択中もここで下げる） */
   const personBottom = personPlantPlace
-    ? personPlantPlace.bottom - 2
-    : flagsFocused && focusedFlagPlace
-      ? focusedFlagPlace.bottom - 2
-      : rotationPanel !== null
-        ? surface.surfaceBottom - 30
-        : surface.surfaceBottom;
+    ? personPlantPlace.bottom - 20
+    : (flagsFocused || expandedFlagIndex >= 0) && focusedFlagPlace
+      ? focusedFlagPlace.bottom - 20
+      : expandedFlagIndex >= 0
+        ? surface.surfaceBottom - 20
+        : rotationPanel !== null
+          ? surface.surfaceBottom - 30
+          : surface.surfaceBottom;
 
   // 星が回転して立ち位置が変わる間、人物に歩行モーションを付ける
   const [personWalking, setPersonWalking] = useState(false);
@@ -299,6 +395,13 @@ export function WordLandingExperience({
     || planting?.phase === 'walk-depth'
     || returningHome;
 
+  /** 単語の照射を隠すべきか（旗選択・植えモーション・旗そばにいるあいだ） */
+  const hideWordBeam =
+    expandedFlagId !== null
+    || wordBeamSuppressed
+    || planting !== null
+    || flagsFocused;
+
   const typeLabel = wordTypeLabel(plot.wordType);
   const wordBeamWidth = Math.min(620, Math.max(180, Array.from(plot.word_id).length * 82));
   const panelBeamMode = activePanel ?? closingPanel;
@@ -311,6 +414,11 @@ export function WordLandingExperience({
     setSentence('');
     setFlags(readStoredFlags(saved, plot.word_id));
     setExpandedFlagId(null);
+    setFlagScrollReady(false);
+    if (flagScrollTimerRef.current !== null) {
+      window.clearTimeout(flagScrollTimerRef.current);
+      flagScrollTimerRef.current = null;
+    }
     setActivePanel(null);
     setClosingPanel(null);
     setRotationPanel(null);
@@ -319,6 +427,11 @@ export function WordLandingExperience({
     setBeamCycled(false);
     prevPanelRef.current = null;
     setBeamReady(false);
+    setWordBeamSuppressed(false);
+    if (wordBeamSuppressTimerRef.current !== null) {
+      window.clearTimeout(wordBeamSuppressTimerRef.current);
+      wordBeamSuppressTimerRef.current = null;
+    }
     setPlanting(null);
     setFlagsFocused(false);
     setReturningHome(false);
@@ -335,6 +448,60 @@ export function WordLandingExperience({
     setClosingPanel(panel);
   };
 
+  /** 旗フォーカス／旗のそばにいる状態から、歩きながらロケット画角へ戻す */
+  const returnToRocket = () => {
+    const wasFlagView = expandedFlagId !== null || flagsFocused;
+    setExpandedFlagId(null);
+    setFlagScrollReady(false);
+    if (flagScrollTimerRef.current !== null) {
+      window.clearTimeout(flagScrollTimerRef.current);
+      flagScrollTimerRef.current = null;
+    }
+    if (wasFlagView) {
+      suppressWordBeamUntilSettled();
+    }
+    if (!flagsFocused) {
+      return;
+    }
+    setFlagsFocused(false);
+    setReturningHome(true);
+    setPersonWalking(true);
+    plantTimersRef.current.push(
+      window.setTimeout(() => {
+        setReturningHome(false);
+        setPersonWalking(false);
+      }, 1400),
+    );
+  };
+
+  /** 旗を選択する。ジェムパネル表示中でもパネルを閉じて旗を中央へ回す。
+   * ポールが伸び終わってから巻物の文章枠を出す */
+  const selectFlag = (flagId: string) => {
+    if (planting !== null) {
+      return;
+    }
+    const nextId = expandedFlagId === flagId ? null : flagId;
+    if (flagScrollTimerRef.current !== null) {
+      window.clearTimeout(flagScrollTimerRef.current);
+      flagScrollTimerRef.current = null;
+    }
+    setFlagScrollReady(false);
+    if (nextId !== null && activePanel !== null) {
+      closePanel(activePanel);
+      setRotationPanel(null);
+    }
+    setExpandedFlagId(nextId);
+    if (nextId !== null) {
+      flagScrollTimerRef.current = window.setTimeout(() => {
+        setFlagScrollReady(true);
+        flagScrollTimerRef.current = null;
+      }, Math.round(FLAG_POLE_EXTEND_DURATION * 1000));
+    } else {
+      // 旗を閉じたあとは画角がロケットへ戻ってから単語照射を再開
+      suppressWordBeamUntilSettled();
+    }
+  };
+
   const togglePanel = (panel: LandingPanel) => {
     if (planting !== null) {
       return;
@@ -343,17 +510,18 @@ export function WordLandingExperience({
       closePanel(panel);
       return;
     }
-    // 旗のそばにいる状態から離れるときは、歩きながらロケット画角へ戻す
-    if (flagsFocused) {
+    // 旗選択中／旗のそばからジェムへ移るときは、ロケット画角を挟まず直接ジェムへ回す
+    if (flagsFocused || expandedFlagId !== null) {
+      setExpandedFlagId(null);
+      setFlagScrollReady(false);
+      if (flagScrollTimerRef.current !== null) {
+        window.clearTimeout(flagScrollTimerRef.current);
+        flagScrollTimerRef.current = null;
+      }
       setFlagsFocused(false);
-      setReturningHome(true);
-      setPersonWalking(true);
-      plantTimersRef.current.push(
-        window.setTimeout(() => {
-          setReturningHome(false);
-          setPersonWalking(false);
-        }, 1400),
-      );
+      setReturningHome(false);
+      // 回転目標を先にジェムへ向け、旗解除の瞬間にロケットへ戻るのを防ぐ
+      setRotationPanel(panel);
     }
     setClosingPanel(null);
     setActivePanel(panel);
@@ -421,6 +589,12 @@ export function WordLandingExperience({
   useEffect(
     () => () => {
       plantTimersRef.current.forEach((id) => window.clearTimeout(id));
+      if (flagScrollTimerRef.current !== null) {
+        window.clearTimeout(flagScrollTimerRef.current);
+      }
+      if (wordBeamSuppressTimerRef.current !== null) {
+        window.clearTimeout(wordBeamSuppressTimerRef.current);
+      }
     },
     [],
   );
@@ -430,6 +604,14 @@ export function WordLandingExperience({
     window.localStorage.setItem(storageKey(plot), JSON.stringify(nextFlags));
     setFlags(nextFlags);
     setExpandedFlagId((current) => (current === flagId ? null : current));
+    if (expandedFlagId === flagId) {
+      setFlagScrollReady(false);
+      if (flagScrollTimerRef.current !== null) {
+        window.clearTimeout(flagScrollTimerRef.current);
+        flagScrollTimerRef.current = null;
+      }
+      suppressWordBeamUntilSettled();
+    }
   };
 
   return (
@@ -438,7 +620,13 @@ export function WordLandingExperience({
       style={{
         color: uiTheme.uiText,
         background: 'radial-gradient(circle at 50% 20%, #141c40 0%, #0a0f26 55%, #05070f 100%)',
-      }}
+        '--gem-size': `${surface.gemSize}px`,
+        '--gem-shadow-top': `${Math.round(surface.gemSize * 1.13)}px`,
+        '--gem-shadow-width': `${Math.round(surface.gemSize * 0.33)}px`,
+        '--gem-shadow-height': `${Math.max(8, Math.round(surface.gemSize * 0.07))}px`,
+        '--gem-selected-shift': `${Math.round(-surface.gemSize * 0.18)}px`,
+        '--gem-glow-inset': `${Math.round(-surface.gemSize * 0.15)}px`,
+      } as CSSProperties}
     >
       <style>{`
         .word-landing {
@@ -914,22 +1102,22 @@ export function WordLandingExperience({
         }
         @keyframes personPlantFlag {
           0%, 100% {
-            transform: rotate(-7deg) translateY(0);
+            transform: rotate(28deg) translateY(0);
           }
           40%, 62% {
-            transform: rotate(3deg) translateY(8px);
+            transform: rotate(8deg) translateY(8px);
           }
         }
         .word-landing__person-held-flag {
           position: absolute;
           z-index: -1;
-          top: 6px;
-          left: 27px;
+          top: 8px;
+          left: 18px;
           width: 2px;
           height: 44px;
           border-radius: 999px;
           background: #f4ecf7;
-          transform: rotate(-7deg);
+          transform: rotate(28deg);
           transform-origin: 50% 100%;
         }
         .word-landing__person-held-flag::after {
@@ -939,7 +1127,7 @@ export function WordLandingExperience({
           left: 2px;
           width: 22px;
           height: 14px;
-          background: linear-gradient(135deg, #ff4b4b, #b80f22);
+          background: linear-gradient(135deg, var(--held-flag), color-mix(in srgb, var(--held-flag) 55%, #1a1020));
           clip-path: polygon(0 0, 100% 10%, 84% 50%, 100% 90%, 0 100%);
         }
         /* 月面（ロケットより手前）に置かれた8面体のジェムボタン。位置と傾きはインラインで計算する */
@@ -968,10 +1156,10 @@ export function WordLandingExperience({
            ジェムの傾きと逆向きに回し、画面中央側から外側の上（左は左上／右は右上）へ伸ばす */
         .word-landing__choice-shadow {
           position: absolute;
-          top: 170px;
+          top: var(--gem-shadow-top, 170px);
           left: 60%;
-          width: 50px;
-          height: 11px;
+          width: var(--gem-shadow-width, 50px);
+          height: var(--gem-shadow-height, 11px);
           border-radius: 50%;
           transform: translateX(-50%) rotate(calc(var(--gem-tilt, 0rad) * -1.8));
           background: rgba(20, 24, 52, .42);
@@ -987,8 +1175,8 @@ export function WordLandingExperience({
         }
         .word-landing__choice-gem {
           position: relative;
-          width: 150px;
-          height: 150px;
+          width: var(--gem-size, 150px);
+          height: var(--gem-size, 150px);
           filter: drop-shadow(0 8px 10px rgba(0,0,0,.4)) drop-shadow(0 0 12px var(--planet-glow));
           /* 軸が惑星（球体）の中心を向くように傾ける */
           transform: rotate(var(--gem-tilt, 0deg));
@@ -998,9 +1186,9 @@ export function WordLandingExperience({
           transform: rotate(var(--gem-tilt, 0deg)) scale(1.12) translateY(-3px);
         }
         /* 選択中のジェムの特別演出：強い光背が脈打ち、波紋リングが広がり続ける。
-           キャンバス描画が右へ約27pxずれるぶん、左へ寄せて照射の中心に合わせる */
+           キャンバス描画のわずかなズレを左へ寄せて照射の中心に合わせる */
         .word-landing__choice-gem.is-selected {
-          translate: -27px 0;
+          translate: var(--gem-selected-shift, -27px) 0;
           filter:
             drop-shadow(0 8px 10px rgba(0,0,0,.4))
             drop-shadow(0 0 20px var(--planet-glow))
@@ -1009,7 +1197,11 @@ export function WordLandingExperience({
         .word-landing__choice-gem.is-selected::before {
           content: "";
           position: absolute;
-          inset: -22px;
+          top: var(--gem-glow-inset, -22px);
+          bottom: var(--gem-glow-inset, -22px);
+          /* キャンバス描画のズレに合わせ、光背を少し右へ */
+          left: calc(var(--gem-glow-inset, -22px) + 20px);
+          right: calc(var(--gem-glow-inset, -22px) - 20px);
           z-index: -1;
           border-radius: 50%;
           background: radial-gradient(circle, var(--planet-glow) 0%, transparent 62%);
@@ -1061,9 +1253,11 @@ export function WordLandingExperience({
         }
         .word-landing__planted {
           position: absolute;
-          z-index: 2;
-          width: 36px;
-          height: 82px;
+          /* dismiss(z-index:3)より手前にして、旗クリックを優先する */
+          z-index: 4;
+          /* ポール中心＋右側の布まで覆うクリック領域（3D旗の布幅に合わせる） */
+          width: var(--flag-hit-w, 96px);
+          height: var(--flag-hit-h, 82px);
           padding: 0;
           border: 0;
           color: #fff;
@@ -1076,84 +1270,102 @@ export function WordLandingExperience({
           transition:
             left .8s cubic-bezier(.25,.6,.25,1),
             bottom .8s cubic-bezier(.25,.6,.25,1),
-            transform .8s cubic-bezier(.25,.6,.25,1);
+            transform .8s cubic-bezier(.25,.6,.25,1),
+            height .55s cubic-bezier(.25,.7,.2,1);
         }
         .word-landing__planted.is-expanded {
           z-index: 6;
+          /* 3Dポールの地上に見える高さ（根元固定で3倍伸長）に合わせる */
+          height: var(--expanded-pole-h, 246px);
+          transform: translateX(-50%) rotate(0rad);
         }
         /* このセッションで刺したばかりの旗は、着陸演出を待たずその場で地面から生える */
         .word-landing__planted.is-new {
           animation: flagRise .5s cubic-bezier(.2,.9,.2,1) both;
         }
-        /* 旗本体はPlanetSphereの3Dシーン内で描画され、ポール（円柱）が
-           月のメッシュに実際にめり込んでいる。この要素はクリック領域と
-           延長ポール・吹き出し・接地影だけを受け持つ */
-        /* クリックで棒（延長ポール）が上へ伸びる。
-           閉じるときは布が畳まれてから縮む（transitionのdelayで順序を作る） */
-        .word-landing__planted-ext {
+        /* 旗本体はPlanetSphereの3Dシーン内で描画される。
+           選択後ポール伸長が終わると、棒の右から巻物のように旗形の枠が開く。
+           枠は塗りつぶさず、グローのある線だけで描く */
+        .word-landing__planted-scroll {
           position: absolute;
-          left: calc(50% - 1.5px);
-          bottom: 74px;
-          width: 3px;
-          height: 96px;
-          border-radius: 999px;
-          background: linear-gradient(to top, #e9edf3, #ffffff);
-          transform: scaleY(0);
-          transform-origin: 50% 100%;
-          pointer-events: none;
-          transition: transform .24s ease-in .18s;
-        }
-        .word-landing__planted-ext::after {
-          content: "";
-          position: absolute;
-          top: -4px;
-          left: 50%;
-          width: 9px;
-          height: 9px;
-          border-radius: 50%;
-          background: var(--planted-flag);
-          transform: translateX(-50%);
-        }
-        .word-landing__planted.is-expanded .word-landing__planted-ext {
-          transform: scaleY(1);
-          transition: transform .26s cubic-bezier(.2,.8,.3,1);
-        }
-        /* 伸びた棒の先端から、布が横へ広がって文章を見せる */
-        .word-landing__planted-bubble {
-          position: absolute;
-          top: -88px;
-          left: calc(50% + 1px);
-          width: min(250px, 66vw);
+          left: calc(50% - 2px);
+          top: 8px;
+          bottom: auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: min(336px, 86.4vw);
+          height: var(--flag-scroll-h, 210px);
           box-sizing: border-box;
-          padding: 12px 36px 12px 14px;
+          padding: 14px 42px 14px 20px;
           color: #fff;
-          font-size: clamp(.62rem, 1.2vw, .76rem);
+          font-size: var(--flag-scroll-font, 1.76rem);
           font-weight: 650;
-          line-height: 1.5;
+          line-height: 1.55;
           letter-spacing: .04em;
-          text-align: left;
+          text-align: center;
           overflow-wrap: anywhere;
           white-space: pre-wrap;
-          text-shadow: 0 1px 4px rgba(0,0,0,.65);
-          background: linear-gradient(135deg, var(--planted-flag), rgba(255,255,255,.18));
-          border-radius: 0 10px 10px 4px;
-          box-shadow: 0 0 14px var(--planet-glow);
+          overflow: visible;
+          text-shadow: 0 0 12px rgba(0,0,0,.55), 0 1px 3px rgba(0,0,0,.45);
+          background: transparent;
           transform: scaleX(0);
           transform-origin: 0 0;
           opacity: 0;
           pointer-events: none;
-          transition: transform .26s cubic-bezier(.4,0,.7,.4), opacity .18s ease .08s;
         }
-        .word-landing__planted.is-expanded .word-landing__planted-bubble {
+        .word-landing__planted-scroll-frame {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          overflow: visible;
+          color: var(--planted-flag);
+          filter:
+            drop-shadow(0 0 3px var(--planet-glow))
+            drop-shadow(0 0 10px var(--planet-glow))
+            drop-shadow(0 0 22px var(--planet-glow));
+          pointer-events: none;
+        }
+        .word-landing__planted-scroll-frame polygon {
+          fill: color-mix(in srgb, var(--planted-flag) 28%, transparent);
+          stroke: currentColor;
+          stroke-width: 1.5;
+          stroke-linejoin: round;
+          vector-effect: non-scaling-stroke;
+        }
+        .word-landing__planted-scroll-text {
+          position: relative;
+          z-index: 1;
+          display: block;
+          max-width: 100%;
+        }
+        .word-landing__planted-scroll.is-open {
           opacity: 1;
-          transform: scaleX(1);
           pointer-events: auto;
-          transition: transform .32s cubic-bezier(.2,.8,.2,1) .22s, opacity .16s ease .22s;
+          animation: flagScrollUnfurl .55s cubic-bezier(.2,.8,.2,1) both;
+        }
+        @keyframes flagScrollUnfurl {
+          0% {
+            opacity: 0;
+            transform: scaleX(0.04) scaleY(0.92);
+            filter: brightness(1.2);
+          }
+          35% {
+            opacity: 1;
+            filter: brightness(1.08);
+          }
+          100% {
+            opacity: 1;
+            transform: scaleX(1) scaleY(1);
+            filter: brightness(1);
+          }
         }
         .word-landing__planted-delete {
           position: absolute;
+          z-index: 2;
           top: 6px;
-          right: 6px;
+          right: 28px;
           display: grid;
           place-items: center;
           width: 26px;
@@ -1379,6 +1591,19 @@ export function WordLandingExperience({
           .word-landing__choice {
             font-size: .72rem;
           }
+          .word-landing__choice:hover .word-landing__choice-gem {
+            transform: rotate(var(--gem-tilt, 0deg)) scale(1.08) translateY(-2px);
+          }
+          .word-landing__choice--left .word-landing__choice-shadow {
+            margin-left: -4px;
+          }
+          .word-landing__choice--right .word-landing__choice-shadow {
+            margin-left: 14px;
+          }
+          .word-landing__choice-bubble {
+            padding: 6px 12px;
+            font-size: .68rem;
+          }
         }
         @media (prefers-reduced-motion: reduce) {
           .word-landing__header,
@@ -1441,7 +1666,7 @@ export function WordLandingExperience({
               color: uiTheme.textMuted,
             }}
           >
-            /map/{getEmotionWordSlug(plot)}
+            /telescope/{getEmotionWordSlug(plot)}
           </p>
         </div>
         <Link
@@ -1468,10 +1693,10 @@ export function WordLandingExperience({
         <div
           className={[
             'word-landing__identity-title',
-            beamPhase === 'off' ? 'is-hidden' : '',
-            beamPhase !== 'off' && beamCycled ? 'is-reveal' : '',
+            beamPhase === 'off' || hideWordBeam ? 'is-hidden' : '',
+            beamPhase !== 'off' && !hideWordBeam && beamCycled ? 'is-reveal' : '',
           ].filter(Boolean).join(' ')}
-          aria-hidden={beamPhase === 'off'}
+          aria-hidden={beamPhase === 'off' || hideWordBeam}
         >
           <p
             style={{
@@ -1679,8 +1904,8 @@ export function WordLandingExperience({
         className={[
           'word-landing__word-beam',
           beamReady ? 'is-ready' : '',
-          beamPhase === 'off' ? 'is-off' : '',
-          beamPhase === 'word' && beamCycled ? 'is-word-open' : '',
+          beamPhase === 'off' || hideWordBeam ? 'is-off' : '',
+          beamPhase === 'word' && !hideWordBeam && beamCycled ? 'is-word-open' : '',
           beamGeometryPanel ? `is-${beamGeometryPanel}` : '',
         ].filter(Boolean).join(' ')}
         aria-hidden
@@ -1691,13 +1916,19 @@ export function WordLandingExperience({
         } as CSSProperties}
       />
 
-      {(activePanel !== null || closingPanel !== null) && (
+      {(activePanel !== null || closingPanel !== null || expandedFlagId !== null) && (
         <button
           type="button"
           className="word-landing__dismiss"
           aria-label="表示を閉じる"
           onClick={() => {
-            if (activePanel) closePanel(activePanel);
+            if (activePanel) {
+              closePanel(activePanel);
+              return;
+            }
+            if (expandedFlagId !== null) {
+              returnToRocket();
+            }
           }}
         />
       )}
@@ -1710,12 +1941,12 @@ export function WordLandingExperience({
         const leftGemPlace = placeOnSurface(
           -surface.gemX,
           surface.gemBottom,
-          rotationPanel === 'compose' ? gemLift : 0,
+          !flagCameraActive && rotationPanel === 'compose' ? gemLift : 0,
         );
         const rightGemPlace = placeOnSurface(
           surface.gemX,
           surface.gemBottom,
-          rotationPanel === 'meaning' ? gemLift : 0,
+          !flagCameraActive && rotationPanel === 'meaning' ? gemLift : 0,
         );
         return (
           <>
@@ -1752,13 +1983,14 @@ export function WordLandingExperience({
                 left: `calc(50% + ${personCurrentX}px)`,
                 bottom: personBottom,
                 transform: 'translateX(-50%)',
+                '--held-flag': uiTheme.accent,
                 /* 旗を刺しに行く間・戻る間は歩幅に合わせて移動し、ワープに見せない */
                 transition: planting
                   ? 'left .8s cubic-bezier(.35,.5,.3,1), bottom .45s cubic-bezier(.25,.6,.25,1), transform .8s cubic-bezier(.25,.6,.25,1)'
                   : returningHome
                     ? 'left 1.4s cubic-bezier(.35,.5,.3,1), bottom .8s cubic-bezier(.25,.6,.25,1), transform .8s cubic-bezier(.25,.6,.25,1)'
                     : undefined,
-              }}
+              } as CSSProperties}
             >
               <span className="word-landing__person-held-flag" />
               <span className="word-landing__person-head" />
@@ -1785,6 +2017,7 @@ export function WordLandingExperience({
               <GemButtonContent
                 label="旗を立てる"
                 color={uiTheme.accent}
+                size={surface.gemSize}
                 selected={
                   activePanel === 'compose' ||
                   closingPanel === 'compose' ||
@@ -1808,6 +2041,7 @@ export function WordLandingExperience({
               <GemButtonContent
                 label="意味を表示"
                 color={uiTheme.accent}
+                size={surface.gemSize}
                 selected={
                   activePanel === 'meaning' ||
                   closingPanel === 'meaning' ||
@@ -1821,10 +2055,19 @@ export function WordLandingExperience({
 
       {flags.map((flag, index) => {
         const isExpanded = expandedFlagId === flag.id;
+        const showScroll = isExpanded && flagScrollReady;
         const spot = flagSpot(index);
         // 旗は星の表面に固定されている想定。ロケットと同じく星の回転に乗せて動かす
         const flagPlace = placeOnSurface(spot.x, spot.bottom, 0, planetRotationDelta);
         const isNew = sessionPlantedIdsRef.current.has(flag.id);
+        const flagSizePx = surface.isMobile ? FLAG_SIZE_MOBILE : FLAG_SIZE_DESKTOP;
+        /* 根元固定で3倍伸長したとき、地表から上に見えるポール長 */
+        const expandedPoleH = flagSizePx * (FLAG_EXPAND_POLE_SCALE - 0.5);
+        /* ポール＋右側の布を覆うヒット領域（布幅0.46・地上に見える高さ〜0.55） */
+        const flagHitW = Math.round(flagSizePx * 1.05);
+        const flagHitH = Math.round(flagSizePx * 0.58);
+        /* 従来の枠（約70px）の3倍 */
+        const scrollH = 210;
         return (
           <div
             key={flag.id}
@@ -1837,26 +2080,45 @@ export function WordLandingExperience({
             ].filter(Boolean).join(' ')}
             aria-expanded={isExpanded}
             aria-label="立てた旗"
-            onClick={() => setExpandedFlagId((current) => (current === flag.id ? null : flag.id))}
+            onClick={() => selectFlag(flag.id)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                setExpandedFlagId((current) => (current === flag.id ? null : flag.id));
+                selectFlag(flag.id);
               }
             }}
             style={{
               left: `calc(50% + ${flagPlace.x}px)`,
               bottom: flagPlace.bottom,
-              transform: `translateX(-50%) rotate(${flagPlace.angleRad}rad)`,
+              /* 選択中は3Dポールと同様に画面に対してまっすぐ立てる */
+              transform: isExpanded
+                ? 'translateX(-50%) rotate(0rad)'
+                : `translateX(-50%) rotate(${flagPlace.angleRad}rad)`,
               '--planted-flag': uiTheme.accent,
               '--planet-glow': uiTheme.accentGlow,
+              '--expanded-pole-h': `${expandedPoleH}px`,
+              '--flag-scroll-h': `${scrollH}px`,
+              '--flag-hit-w': `${flagHitW}px`,
+              '--flag-hit-h': `${flagHitH}px`,
             } as CSSProperties}
           >
-            {/* クリックで上に伸びる延長ポールと、そこから横へ広がる布（文章） */}
-            <span className="word-landing__planted-ext" aria-hidden />
-            <span className="word-landing__planted-bubble">
-              {flag.sentence}
-              {isExpanded && (
+            {showScroll && (
+              <div
+                className="word-landing__planted-scroll is-open"
+                onClick={(event) => event.stopPropagation()}
+                style={{
+                  '--flag-scroll-font': flagScrollFontSize(flag.sentence),
+                } as CSSProperties}
+              >
+                <svg
+                  className="word-landing__planted-scroll-frame"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  aria-hidden
+                >
+                  <polygon points="1.5,1.5 98.5,1.5 84,50 98.5,98.5 1.5,98.5" />
+                </svg>
+                <span className="word-landing__planted-scroll-text">{flag.sentence}</span>
                 <button
                   type="button"
                   className="word-landing__planted-delete"
@@ -1874,8 +2136,8 @@ export function WordLandingExperience({
                     <path d="M14 11v6" />
                   </svg>
                 </button>
-              )}
-            </span>
+              </div>
+            )}
             <span className="word-landing__planted-base" />
           </div>
         );
@@ -1892,7 +2154,13 @@ export function WordLandingExperience({
           flags={flags.map((flag, index) => {
             const spot = flagSpot(index);
             const polar = toPolar(spot.x, spot.bottom);
-            return { id: flag.id, angleRad: polar.angle, radiusPx: polar.radius };
+            /* 3D旗は必ず星の半径上に置き、画面幅で極座標半径がズレて星から抜けるのを防ぐ */
+            return {
+              id: flag.id,
+              angleRad: polar.angle,
+              radiusPx: surface.radius,
+              selected: expandedFlagId === flag.id,
+            };
           })}
         />
       </div>

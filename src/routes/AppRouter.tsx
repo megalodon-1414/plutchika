@@ -17,8 +17,8 @@ export function AppRouter() {
         <Route element={<SiteLayout showSiteChrome={false} />}>
           <Route path={ROUTES.home} element={<HomePage />} />
           <Route path={ROUTES.emotionMap} element={<EmotionMapPage />} />
-          <Route path={ROUTES.emotionWordDetail} element={<EmotionWordDetailPage />} />
           <Route path={ROUTES.telescopeSpace} element={<TelescopeSpacePage />} />
+          <Route path={ROUTES.emotionWordDetail} element={<EmotionWordDetailPage />} />
 
           <Route path={ROUTES.conceptTutorial} element={<ConceptTutorialPage />} />
 
