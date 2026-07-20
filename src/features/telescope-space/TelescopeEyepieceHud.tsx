@@ -363,18 +363,25 @@ export function TelescopeGuideLabelHud({
         ? 1
         : 0.55;
 
+  const captionSize = 'clamp(0.62rem, 1.85vmin, 0.88rem)';
+  const primarySize =
+    detailMode && !regionMode
+      ? 'clamp(0.88rem, 2.65vmin, 1.18rem)'
+      : 'clamp(1.02rem, 3.55vmin, 1.58rem)';
+  const detectionSize = 'clamp(1.02rem, 3.55vmin, 1.58rem)';
+
   return (
     <div
       aria-live="polite"
       style={{
         position: 'absolute',
         left: '50%',
-        top: 'clamp(72px, 13vh, 150px)',
+        top: 'clamp(48px, 10vmin, 132px)',
         transform: 'translateX(-50%)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 8,
+        gap: 'clamp(3px, 0.9vmin, 6px)',
         opacity: 0.92,
         pointerEvents: 'none',
         zIndex: 2,
@@ -383,7 +390,7 @@ export function TelescopeGuideLabelHud({
       <span
         style={{
           color: 'rgba(244, 236, 247, 0.72)',
-          fontSize: '1.02rem',
+          fontSize: captionSize,
           fontWeight: 550,
           letterSpacing: '0.18em',
           whiteSpace: 'nowrap',
@@ -394,7 +401,7 @@ export function TelescopeGuideLabelHud({
       <span
         style={{
           color: primaryColor,
-          fontSize: detailMode && !regionMode ? '1.4rem' : '1.9rem',
+          fontSize: primarySize,
           fontWeight: 750,
           letterSpacing: '0.14em',
           whiteSpace: 'nowrap',
@@ -410,7 +417,7 @@ export function TelescopeGuideLabelHud({
           style={{
             marginTop: -2,
             color: 'rgba(244, 236, 247, 0.72)',
-            fontSize: '1.02rem',
+            fontSize: captionSize,
             fontWeight: 550,
             letterSpacing: '0.18em',
             whiteSpace: 'nowrap',
@@ -423,7 +430,7 @@ export function TelescopeGuideLabelHud({
         <span
           style={{
             color: detectionColor,
-            fontSize: '1.9rem',
+            fontSize: detectionSize,
             fontWeight: 750,
             letterSpacing: '0.14em',
             whiteSpace: 'nowrap',

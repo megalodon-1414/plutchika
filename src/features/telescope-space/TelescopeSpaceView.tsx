@@ -9,18 +9,12 @@ import {
 import { Link } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import { getBasicEmotion, getEmotionById } from '../../data/emotions';
-import { EmotionMinimap } from '../../components/EmotionMinimap';
 import { ExplorationWordInfoPanel } from '../../components/ExplorationWordInfoPanel';
 import { ROUTES } from '../../routes/paths';
 import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
 import type { UserPlotRow } from '../../types/userPlot';
 import { complementaryHex } from '../../utils/emotionColor';
 import { getPrimaryEmotionColor } from '../../utils/emotionPlotBridge';
-import {
-  DEFAULT_EMOTION_UI_ACCENT,
-  getEmotionUiTheme,
-} from '../../utils/emotionUiTheme';
-import type { MinimapSyncState } from '../../utils/emotionMinimapLayout';
 import { mergeWithSeedPlots } from '../../utils/seedPlots';
 import type { TelescopeSettledPhase, TelescopeZoomPhase } from './constants';
 import {
@@ -312,7 +306,6 @@ export function TelescopeSpaceView() {
     direction: -1 | 1;
     at: number;
   } | null>(null);
-  const [minimapSync, setMinimapSync] = useState<MinimapSyncState | null>(null);
   const [wordPlots, setWordPlots] = useState<UserPlotRow[]>([]);
   const [infoUiScale, setInfoUiScale] = useState(getInfoUiScale);
   const [layer2HudActive, setLayer2HudActive] = useState(false);
@@ -373,14 +366,6 @@ export function TelescopeSpaceView() {
   );
   const showHud = true;
   const showRimGlow = settled !== 'far';
-
-  const minimapAccentId = (focusBasicId ?? viewFocus.nearest?.id ?? null) as EmotionId | null;
-  const minimapUiTheme = useMemo(() => {
-    const accent = minimapAccentId
-      ? getPrimaryEmotionColor(minimapAccentId)
-      : DEFAULT_EMOTION_UI_ACCENT;
-    return getEmotionUiTheme(accent, 'dark');
-  }, [minimapAccentId]);
 
   const startZoomOutStep = useCallback((from: TelescopeSettledPhase) => {
     if (from === 'exploration') {
@@ -514,10 +499,6 @@ export function TelescopeSpaceView() {
 
   const handleViewFocus = useCallback((focus: TelescopeViewFocus) => {
     setViewFocus(focus);
-  }, []);
-
-  const handleMinimapSync = useCallback((state: MinimapSyncState | null) => {
-    setMinimapSync(state);
   }, []);
 
   const detailHudMode = settled === 'detail' && layer2HudActive;
@@ -836,12 +817,10 @@ export function TelescopeSpaceView() {
           focusBasicId={focusBasicId}
           selectedDyadId={selectedDyadId}
           wordPlots={wordPlots}
-          viewFocus={viewFocus}
           onZoomComplete={handleZoomComplete}
           onCanvasClickZoom={handleCanvasClickZoom}
           onLayer2RotationComplete={() => setLayer2HudActive(true)}
           onViewFocus={handleViewFocus}
-          onMinimapSync={handleMinimapSync}
           regionIndicator={regionIndicatorRef}
           segmentFocus={segmentFocusRef}
           explorationPlotId={explorationPlotId}
@@ -1097,21 +1076,6 @@ export function TelescopeSpaceView() {
             selectedExplorationEmotion={selectedExploration}
           />
         </div>
-      </div>
-
-      <div
-        style={{
-          position: 'absolute',
-          top: Math.round(20 * infoUiScale),
-          left: Math.round(20 * infoUiScale),
-          zIndex: 2,
-          pointerEvents: 'none',
-          transform: `scale(${infoUiScale})`,
-          transformOrigin: 'top left',
-          transition: 'transform 180ms ease',
-        }}
-      >
-        <EmotionMinimap syncState={minimapSync} uiTheme={minimapUiTheme} layout="galaxy-ring" />
       </div>
 
       <div
