@@ -1,7 +1,7 @@
-import { Html, Text } from '@react-three/drei';
+import { Html } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { RefObject } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import * as THREE from 'three';
 import { PlutchikPetalWheel } from '../../../components/landing/PlutchikPetalWheel';
 import type { BasicEmotionId } from '../../../data/emotions';
@@ -34,6 +34,79 @@ const ROTATION_LERP_SPEED = 4;
 const PLANET_BASE_COLOR = '#c3cbef';
 const CRATER_COLOR = 'rgba(64, 68, 116, 0.4)';
 const CRATER_COUNT = 46;
+
+type PanelTextRole = 'hook' | 'heading' | 'subcopy' | 'body';
+
+const PANEL_TEXT_ROLE_CLASS: Record<PanelTextRole, string> = {
+  hook: 'home-intro-panel-text home-intro-panel-text--hook font-momochidori font-momochidori--medium',
+  heading: 'home-intro-panel-text home-intro-panel-text--heading font-momochidori font-momochidori--bold',
+  subcopy: 'home-intro-panel-text home-intro-panel-text--subcopy font-momochidori font-momochidori--semibold',
+  body: 'home-intro-panel-text home-intro-panel-text--body font-momochidori font-momochidori--medium',
+};
+
+function anchorTransformFor(anchorX: 'left' | 'right' | 'center'): string {
+  if (anchorX === 'right') {
+    return 'translateX(-100%)';
+  }
+  if (anchorX === 'center') {
+    return 'translateX(-50%)';
+  }
+  return 'none';
+}
+
+/**
+ * 百千鳥（Adobe Fonts）を効かせるため、パネル見出し類も troika Text ではなく Html で描画する。
+ */
+function PanelHtmlText({
+  text,
+  x,
+  startY,
+  maxWidth,
+  fontSize,
+  lineHeight = 1.35,
+  color,
+  letterSpacing,
+  anchorX,
+  textAlign,
+  opacity,
+  role,
+}: {
+  text: string;
+  x: number;
+  startY: number;
+  maxWidth: number;
+  fontSize: number;
+  lineHeight?: number;
+  color: string;
+  letterSpacing?: number | string;
+  anchorX: 'left' | 'right' | 'center';
+  textAlign: 'left' | 'right' | 'center';
+  opacity: number;
+  role: PanelTextRole;
+}) {
+  return (
+    <Html position={[x, startY, 0]} style={{ pointerEvents: 'none' }}>
+      <div
+        className={PANEL_TEXT_ROLE_CLASS[role]}
+        style={{
+          transform: anchorTransformFor(anchorX),
+          width: maxWidth,
+          fontSize,
+          lineHeight,
+          color,
+          textAlign,
+          letterSpacing,
+          opacity,
+          transition: 'opacity 0.2s linear',
+          wordBreak: 'break-word',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {text}
+      </div>
+    </Html>
+  );
+}
 
 /** クレーターは凹凸をモデリングせず、平らなテクスチャ画像として貼る。 */
 function createPlanetTexture(): THREE.CanvasTexture {
@@ -173,14 +246,12 @@ function LinkedBodyText({
   opacity,
   onNavigate,
 }: LinkedBodyTextProps) {
-  const anchorTransform =
-    anchorX === 'right' ? 'translateX(-100%)' : anchorX === 'center' ? 'translateX(-50%)' : 'none';
-
   return (
     <Html position={[x, startY, 0]} style={{ pointerEvents: 'none' }}>
       <div
+        className={PANEL_TEXT_ROLE_CLASS.body}
         style={{
-          transform: anchorTransform,
+          transform: anchorTransformFor(anchorX),
           width: maxWidth,
           fontSize,
           lineHeight,
@@ -230,63 +301,61 @@ function WelcomePanelLayout({
     skyWidth >= NAV_INDICATOR_NARROW_BREAKPOINT_PX
       ? skyWidth / 2 - (NAV_INDICATOR_RIGHT_OFFSET_PX + NAV_INDICATOR_WIDTH_PX + NAV_INDICATOR_TEXT_GAP_PX)
       : skyWidth * 0.42;
-  const bodyFontSize = skyHeight * 0.026;
+  const bodyFontSize = skyHeight * 0.029;
   // 折り返し幅を文字数4つ分ほど広げ、「か?」「です。」のような孤立した末尾の1〜2文字が
   // 単独の行にならないようにする。
   const rightWidth = skyWidth * 0.48 + bodyFontSize * 8;
   return (
     <>
-      <Text
-        position={[leftX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={leftX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[leftX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={leftX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
-      <Text
-        position={[leftX, skyHeight * 0.5, 0]}
-        fontSize={skyHeight * 0.026}
+        opacity={opacity}
+        role="heading"
+      />
+      <PanelHtmlText
+        text={content.subcopy}
+        x={leftX}
+        startY={skyHeight * 0.5}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.024}
+        lineHeight={1.5}
         color="#c39bd3"
+        letterSpacing="0.06em"
         anchorX="left"
-        anchorY="top"
-        letterSpacing={0.08}
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.subcopy}
-      </Text>
+        opacity={opacity}
+        role="subcopy"
+      />
       <LinkedBodyText
         segments={content.body}
         x={rightX}
         startY={skyHeight * 0.42}
         maxWidth={rightWidth}
         fontSize={bodyFontSize}
-        lineHeight={1.6}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#c39bd3"
         anchorX="right"
@@ -314,42 +383,41 @@ function SplitGraphicPanelLayout({
   const leftWidth = skyWidth * 0.42;
   return (
     <>
-      <Text
-        position={[leftX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={leftX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[leftX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={leftX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
+        opacity={opacity}
+        role="heading"
+      />
       <LinkedBodyText
         segments={content.body}
         x={leftX}
         startY={skyHeight * 0.6}
         maxWidth={leftWidth}
-        fontSize={skyHeight * 0.026}
-        lineHeight={1.6}
+        fontSize={skyHeight * 0.029}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#c39bd3"
         anchorX="left"
@@ -392,7 +460,7 @@ function SplitGraphicPanelLayout({
  * 深掘りルート用。必須ルート02（ようこそパネル＝WelcomePanelLayout）と同じ左右分割レイアウト。
  * フック・見出しは片側、本文はもう片側。content.mirrored が true なら左右を入れ替える
  * （隣り合うパネル同士で交互に配置するため。深掘りは本文がリンクを含まない単純な文字列なので
- * 通常の<Text>で描画する）。
+ * LinkedBodyText で描画する）。
  */
 function SimplePanelLayout({
   content,
@@ -409,7 +477,7 @@ function SimplePanelLayout({
   const headingWidth = skyWidth * 0.5;
   const headingAnchorX: 'left' | 'right' = mirrored ? 'right' : 'left';
 
-  const bodyFontSize = skyHeight * 0.026;
+  const bodyFontSize = skyHeight * 0.029;
   // WelcomePanelLayoutと同様、末尾の孤立行を防ぐため文字数8つ分ほど幅を広げてある。
   const bodyWidth = skyWidth * 0.48 + bodyFontSize * 8;
   // 本文はフック・見出しと同じ基準位置・同じ揃え方向にする（左右どちらの配置でも1つのカラムとして揃える）。
@@ -418,39 +486,37 @@ function SimplePanelLayout({
 
   return (
     <>
-      <Text
-        position={[headingX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={headingX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={headingWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX={headingAnchorX}
-        anchorY="top"
-        maxWidth={headingWidth}
         textAlign={headingAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[headingX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={headingX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={headingWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX={headingAnchorX}
-        anchorY="top"
-        maxWidth={headingWidth}
         textAlign={headingAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
+        opacity={opacity}
+        role="heading"
+      />
       {/*
         本文は必須ルート（WelcomePanelLayout等）のLinkedBodyTextと全く同じコンポーネント・スタイルで描画する。
-        troika-three-text（<Text>）とHTML（<Html>）はフォント解決・アンチエイリアシングが異なり、
-        fontSize/lineHeightの数値を揃えるだけでは見た目が一致しないため、同じHTMLレンダリング経路に統一する。
+        百千鳥は Adobe Fonts（CSS）経由のため、見出しも含め Html 経路に統一している。
         深掘りの本文にリンクは無いので、リンクなしの単一セグメントとして渡す。
       */}
       <LinkedBodyText
@@ -459,7 +525,7 @@ function SimplePanelLayout({
         startY={skyHeight * 0.52}
         maxWidth={bodyWidth}
         fontSize={bodyFontSize}
-        lineHeight={1.6}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#d8cfe0"
         anchorX={bodyAnchorX}
@@ -509,49 +575,48 @@ function DualWheelPanelLayout({
 
   // 狭い画面では本文が長く（プレースホルダーの仮テキストが特に長い）折り返し行数がかさむため、
   // 小さめ・幅広にして行数を抑える。花2輪はさらに下（地平線に立つ人物と重ならない最小限の位置）へ寄せる。
-  const bodyFontSize = isNarrow ? skyHeight * 0.019 : skyHeight * 0.026;
+  const bodyFontSize = isNarrow ? skyHeight * 0.021 : skyHeight * 0.029;
   // 花2輪＋組み合わせ感情名のグラフィック全体を、さらに左へ48px寄せる。
   const graphicsX = (isNarrow ? 0 : skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX) - 48;
   const graphicsY = isNarrow ? skyHeight * 0.14 : skyHeight * SCREEN_VERTICAL_CENTER_FRACTION;
 
   return (
     <>
-      <Text
-        position={[textX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={textX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={textWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX={textAnchorX}
-        anchorY="top"
-        maxWidth={textWidth}
         textAlign={textAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[textX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={textX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={textWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX={textAnchorX}
-        anchorY="top"
-        maxWidth={textWidth}
         textAlign={textAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
+        opacity={opacity}
+        role="heading"
+      />
       <LinkedBodyText
         segments={[{ text: content.body }]}
         x={textX}
         startY={skyHeight * 0.6}
         maxWidth={textWidth}
         fontSize={bodyFontSize}
-        lineHeight={1.6}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#d8cfe0"
         anchorX={textAnchorX}
@@ -581,12 +646,12 @@ function DualWheelPanelLayout({
           </div>
           <div
             key={combined?.name ?? 'none'}
-            className={`dual-wheel-badge${combined ? ' dual-wheel-badge--active' : ''}`}
+            className={`dual-wheel-badge font-momochidori font-momochidori--bold${combined ? ' dual-wheel-badge--active' : ''}`}
             style={{
-              fontSize: '2.2em',
+              fontSize: '2.05em',
               backgroundColor: combined?.color ?? 'transparent',
               opacity: combined ? 1 : 0,
-              ...(combined ? ({ '--dual-wheel-glow-color': combined.color } as React.CSSProperties) : {}),
+              ...(combined ? ({ '--dual-wheel-glow-color': combined.color } as CSSProperties) : {}),
             }}
           >
             {combined?.name ?? ' '}

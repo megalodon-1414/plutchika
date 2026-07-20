@@ -13,6 +13,8 @@
   color: #f4ecf7;
   touch-action: none;
   overscroll-behavior: none;
+  font-family: var(--font-family-momochidori);
+  font-feature-settings: 'palt' 1;
 }
 
 /*
@@ -45,25 +47,50 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 18px;
-  /* このロゴ画面だけはもとのフォント（サイト共通のTOT-雫花角丸ゴシックより前のフォント）に固定する。 */
-  font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', sans-serif;
+  gap: 22px;
+  font-family: var(--font-family-momochidori);
+  font-feature-settings: 'palt' 1;
 }
 
 .home-intro-logo__mark {
   margin: 0;
-  font-size: clamp(2rem, 6vw, 3.4rem);
-  font-weight: 600;
-  letter-spacing: 0.22em;
+  font-size: clamp(2.35rem, 7vw, 3.85rem);
+  font-variation-settings: 'wght' 720, 'wdth' 108;
+  letter-spacing: 0.18em;
   color: #f4ecf7;
+  line-height: 1.1;
 }
 
 .home-intro-logo__hint {
   margin: 0;
-  font-size: 0.72rem;
-  letter-spacing: 0.3em;
+  font-size: 0.8rem;
+  font-variation-settings: 'wght' 500, 'wdth' 100;
+  letter-spacing: 0.34em;
   color: #9f8aaa;
   animation: home-intro-hint-pulse 1.8s ease-in-out infinite;
+}
+
+/* 惑星パネル上のテキスト階層（Html 描画・百千鳥） */
+.home-intro-panel-text {
+  margin: 0;
+  font-family: var(--font-family-momochidori);
+  font-feature-settings: 'palt' 1;
+}
+
+.home-intro-panel-text--hook {
+  font-variation-settings: 'wght' 500, 'wdth' 100;
+}
+
+.home-intro-panel-text--heading {
+  font-variation-settings: 'wght' 760, 'wdth' 102;
+}
+
+.home-intro-panel-text--subcopy {
+  font-variation-settings: 'wght' 620, 'wdth' 100;
+}
+
+.home-intro-panel-text--body {
+  font-variation-settings: 'wght' 480, 'wdth' 100;
 }
 
 /* 2層パララックス背景（星空／惑星） */
@@ -193,8 +220,10 @@
   top: 16px;
   left: 20px;
   z-index: 3;
-  font-size: 1rem;
-  letter-spacing: 0.06em;
+  font-family: var(--font-family-momochidori);
+  font-size: 0.92rem;
+  font-variation-settings: 'wght' 520, 'wdth' 100;
+  letter-spacing: 0.08em;
   color: #f4ecf7;
   text-decoration: none;
   text-shadow: 0 1px 6px rgba(5, 7, 15, 0.85);
@@ -319,13 +348,15 @@
 }
 
 .home-intro-board-cta__button {
-  padding: 12px 34px;
+  padding: 13px 36px;
   border: 1px solid rgba(195, 155, 211, 0.7);
   border-radius: 999px;
   background: rgba(20, 28, 64, 0.55);
   color: #f4ecf7;
-  font-size: 0.95rem;
-  letter-spacing: 0.14em;
+  font-family: var(--font-family-momochidori);
+  font-size: 1.02rem;
+  font-variation-settings: 'wght' 650, 'wdth' 100;
+  letter-spacing: 0.12em;
   cursor: pointer;
   backdrop-filter: blur(4px);
   box-shadow: 0 0 18px rgba(195, 155, 211, 0.25);
@@ -396,8 +427,10 @@
 }
 
 .nav-indicator__label {
-  font-size: 0.88rem;
-  letter-spacing: 0.06em;
+  font-family: var(--font-family-momochidori);
+  font-size: 0.84rem;
+  font-variation-settings: 'wght' 500, 'wdth' 100;
+  letter-spacing: 0.08em;
   color: rgba(190, 230, 200, 0.5);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
   white-space: nowrap;
@@ -441,7 +474,7 @@
 
 .nav-indicator__stage--current .nav-indicator__label {
   color: #ffffff;
-  font-weight: 600;
+  font-variation-settings: 'wght' 700, 'wdth' 100;
 }
 
 .nav-indicator__stage--current .nav-indicator__dot {
@@ -488,9 +521,10 @@
 }
 
 .nav-indicator__previous-text {
-  font-size: 8.45px;
+  font-family: var(--font-family-momochidori);
+  font-size: 8.8px;
   fill: rgba(180, 235, 190, 0.6);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
 }
 
 @keyframes nav-indicator-orbit-spin {
@@ -520,8 +554,9 @@
   min-height: 1.4em;
   border-radius: 0.32em;
   color: #ffffff;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-family: var(--font-family-momochidori);
+  font-variation-settings: 'wght' 750, 'wdth' 100;
+  letter-spacing: 0.06em;
   text-align: center;
   transition:
     opacity 0.3s ease,
