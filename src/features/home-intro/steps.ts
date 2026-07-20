@@ -25,10 +25,9 @@ export const HOME_INTRO_STEPS: HomeIntroStepDefinition[] = [
       layout: 'welcome',
       hook: '心のもやもやにピッタリなことばを、みつける場所です。',
       heading: 'PLUTCHIKA(ぷるちか)へようこそ',
-      subcopy: 'WELCOME TO THE ぷるちか',
       body: [
         {
-          text: '私たちは毎日、たくさんの感情の中で生きています。「なんだか心が落ち着かない」「うれしいけれど、どこか寂しい」……。そんな風に、自分の気持ちをうまく言葉にできず、モヤモヤした経験はありませんか?',
+          text: '私たちは毎日、たくさんの感情の中で生きています。\n「なんだか心が落ち着かない」「うれしいけれど、どこか寂しい」……。\nそんな風に、自分の気持ちをうまく言葉にできず、モヤモヤした経験はありませんか?',
         },
         { text: '心理学', linkTo: `${ROUTES.deepDive}?panel=1&from=welcome` },
         {

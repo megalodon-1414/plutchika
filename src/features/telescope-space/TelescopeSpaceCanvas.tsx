@@ -44,8 +44,11 @@ import {
 } from './layer3Region';
 import {
   computeTelescopeExplorationCameraPose,
+  explorationOrbitAngle,
+  explorationOrbitRadiusNorm,
   getTelescopeRegionPlotPosition,
   TELESCOPE_EXPLORATION_VIEW,
+  wrapAngleDelta,
   type TelescopeExplorationHudState,
 } from './layer4Exploration';
 import {
@@ -764,13 +767,20 @@ function TelescopeCameraController({
         getTelescopeRegionDefinition(selectedDyadId, focusBasicId);
       if (region) {
         regionDefinition.current = region;
+        const alreadyExploring = mode.current === 'exploration';
         mode.current = 'exploration';
         zoomInCameraLock.current = false;
         layer2SceneRef.current?.(false);
         camera.fov = TELESCOPE_EXPLORATION_VIEW.fov;
         camera.updateProjectionMatrix();
 
-        /* 単語詳細から戻ったときなど、確定探索へ直接入った場合は区画へカメラを据える */
+        // ???????4?????? yaw / offset ??????
+        // ???????????? useFrame ???????
+        if (alreadyExploring) {
+          lastExplorationPlotId.current = explorationPlotId ?? null;
+          return;
+        }
+
         const plot = explorationPlotId
           ? wordPlots.find((row) => row.word_id === explorationPlotId)
           : null;
@@ -796,7 +806,6 @@ function TelescopeCameraController({
           );
           currentLookAt.current.copy(TMP_LOOK);
         }
-
       }
     } else if (zoomPhase === 'detail' && focusBasicId) {
       mode.current = 'focus';
@@ -833,6 +842,8 @@ function TelescopeCameraController({
     let lastX = 0;
     let lastY = 0;
     let dragged = false;
+    /** ????4: ?????????????null ???????????????? */
+    let lastExplorationOrbitAngle: number | null = null;
 
     const syncAim = (event: PointerEvent) => {
       updateTelescopePointerFromClient(
@@ -853,6 +864,7 @@ function TelescopeCameraController({
       lastX = event.clientX;
       lastY = event.clientY;
       dragged = false;
+      lastExplorationOrbitAngle = null;
       el.setPointerCapture(event.pointerId);
       el.style.cursor = getTelescopeCanvasCursor('grabbing');
     };
@@ -875,6 +887,7 @@ function TelescopeCameraController({
           TELESCOPE_CLICK_DRAG_THRESHOLD_PX * TELESCOPE_CLICK_DRAG_THRESHOLD_PX
       ) {
         dragged = true;
+        lastExplorationOrbitAngle = null;
       }
 
       if (!dragged || animating.current) {
@@ -899,10 +912,37 @@ function TelescopeCameraController({
         return;
       }
 
-      // ????4??????????????? xy ??????????
+      // ????4: ??????????????????????????????
       if (mode.current === 'exploration') {
+        const rect = el.getBoundingClientRect();
+        const cx = rect.left + rect.width * 0.5;
+        const cy = rect.top + rect.height * 0.5;
+        const halfSize = Math.min(rect.width, rect.height) * 0.5;
+        const radiusNorm = explorationOrbitRadiusNorm(
+          event.clientX,
+          event.clientY,
+          cx,
+          cy,
+          halfSize,
+        );
+        if (radiusNorm < TELESCOPE_EXPLORATION_VIEW.orbitDeadzone) {
+          lastExplorationOrbitAngle = null;
+          return;
+        }
+        const angle = explorationOrbitAngle(
+          event.clientX,
+          event.clientY,
+          cx,
+          cy,
+        );
+        if (lastExplorationOrbitAngle == null) {
+          lastExplorationOrbitAngle = angle;
+          return;
+        }
+        const delta = wrapAngleDelta(lastExplorationOrbitAngle, angle);
+        lastExplorationOrbitAngle = angle;
         explorationYaw.current +=
-          dx * TELESCOPE_EXPLORATION_VIEW.rotateSensitivity * dragMul;
+          delta * TELESCOPE_EXPLORATION_VIEW.orbitGain * dragMul;
         return;
       }
 
@@ -1209,10 +1249,12 @@ function TelescopeCameraController({
           explorationRetargetProgress.current = Math.min(
             1,
             explorationRetargetProgress.current +
-              delta / (TELESCOPE_EXPLORATION_VIEW.moveMs / 1000),
+              delta / (TELESCOPE_EXPLORATION_VIEW.segmentMoveMs / 1000),
           );
           const t = explorationRetargetProgress.current;
-          const eased = t * t * (3 - 2 * t);
+          // ease-in-out cubic ? ???????????????
+          const eased =
+            t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
           explorationLook.current.lerpVectors(
             explorationFromLook.current,
             explorationToLook.current,

@@ -24,9 +24,8 @@
 .home-intro-crossfade {
   position: absolute;
   inset: 0;
-  /* ①ロゴ⇔歩行シーンの切り替えのみで使う。3D花ロゴの散開・中心球の受け渡し演出が
-     はっきり見える速さにするため、意図的にゆっくりめ（元の0.45sの5倍）にしてある。 */
-  transition: opacity 2.25s ease;
+  /* ①ロゴ⇔歩行シーンの切り替え。文字・花びらの受け渡しがダレない速さに揃える。 */
+  transition: opacity 0.9s ease;
 }
 
 .home-intro-crossfade--visible {
@@ -52,6 +51,14 @@
   transform: translate(-50%, -50%);
   text-align: center;
   white-space: nowrap;
+  opacity: 1;
+  /* ロゴ離脱時はクロスフェードより先に文字だけ消す（残りすぎ防止） */
+  transition: opacity 0.35s ease;
+}
+
+.home-intro-logo__text--leaving {
+  opacity: 0;
+  transition: opacity 0.35s ease;
 }
 
 @media (max-width: 640px) {
@@ -346,25 +353,18 @@
   animation: home-intro-fade-in 0.7s ease 0.35s both;
 }
 
-
-.home-intro-board-cta__button {
-  padding: 13px 36px;
-  border: 1px solid rgba(195, 155, 211, 0.7);
-  border-radius: 999px;
-  background: rgba(20, 28, 64, 0.55);
+.home-intro-board-title {
+  margin: 0;
+  font-family: var(--font-family-momochidori);
+  font-size: clamp(1.7rem, 5.2vw, 2.9rem);
+  font-variation-settings: 'wght' 650, 'wdth' 100;
+  line-height: 1.55;
+  /* letter-spacing は末尾にも余白が付くため、同量の padding-left で左右の視覚中心を揃える */
+  letter-spacing: 0.22em;
+  padding-left: 0.22em;
+  text-align: center;
   color: #f4ecf7;
-  /* <button>はUAスタイルシートでbodyのfont-family/font-weightを継承しないため明示する。 */
-  font-family: inherit;
-  font-weight: inherit;
-  font-size: 1.02rem;
-  letter-spacing: 0.12em;
-  cursor: pointer;
-  backdrop-filter: blur(4px);
-  box-shadow: 0 0 18px rgba(195, 155, 211, 0.25);
-  transition:
-    box-shadow 0.3s ease,
-    background 0.3s ease,
-    transform 0.3s ease;
+  text-shadow: 0 2px 18px rgba(5, 7, 15, 0.85);
 }
 
 .home-intro-board-scroll-hint {

@@ -1,6 +1,6 @@
 import { Html } from '@react-three/drei';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import type { UserPlotRow } from '../../types/userPlot';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
@@ -11,6 +11,7 @@ import {
   TELESCOPE_EXPLORATION_VIEW,
 } from './layer4Exploration';
 import type { TelescopeRegionDefinition } from './layer3Region';
+import { TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH } from './constants';
 
 const PLOT_RADIUS = 0.028;
 const WAVE_COUNT = 2;
@@ -27,16 +28,36 @@ const LABEL_LEADER_STEP_PX = 56;
 const LABEL_MAX_LEVEL = 3;
 /** 縦書きラベルの文字サイズ（px） */
 const LABEL_FONT_SIZE_PX = 32;
+/** スマホ時のラベル縮小率（40%縮小 = 0.6倍） */
+const LABEL_FONT_SIZE_MOBILE_SCALE = 0.6;
 /** 画面端との余白（px） */
 const LABEL_VIEWPORT_MARGIN_PX = 28;
+/** 近傍判定中心・点の見た目をセグメント移動に追従させる補間速度 */
+const SEGMENT_VISUAL_SMOOTH = 5.2;
+/** 点の不透明度・スケール補間 */
+const PLOT_VISUAL_SMOOTH = 7.5;
 
 type LabelSide = 'up' | 'down';
 type LabelPlacement = { level: number; side: LabelSide };
 type LabelLevelsRef = { current: Map<string, LabelPlacement> };
+type SegmentCenterRef = MutableRefObject<[number, number]>;
 
-function estimateVerticalLabelHeightPx(word: string): number {
+function labelFontSizePx(): number {
+  if (
+    typeof window !== 'undefined' &&
+    window.innerWidth <= TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH
+  ) {
+    return LABEL_FONT_SIZE_PX * LABEL_FONT_SIZE_MOBILE_SCALE;
+  }
+  return LABEL_FONT_SIZE_PX;
+}
+
+function estimateVerticalLabelHeightPx(
+  word: string,
+  fontSize = labelFontSizePx(),
+): number {
   // writing-mode: vertical-rl + letter-spacing 0.1em の概算
-  return Math.max(LABEL_FONT_SIZE_PX, word.length * LABEL_FONT_SIZE_PX * 1.1);
+  return Math.max(fontSize, word.length * fontSize * 1.1);
 }
 
 function labelStackExtentPx(level: number, word: string): number {
@@ -57,13 +78,13 @@ function labelStackExtentPx(level: number, word: string): number {
 function ExplorationLabelLevelCoordinator({
   plots,
   region,
-  segmentCenter,
+  segmentCenterRef,
   selectedPlotId,
   levels,
 }: {
   plots: readonly UserPlotRow[];
   region: TelescopeRegionDefinition;
-  segmentCenter: readonly [number, number];
+  segmentCenterRef: SegmentCenterRef;
   selectedPlotId: string;
   levels: LabelLevelsRef;
 }) {
@@ -76,6 +97,7 @@ function ExplorationLabelLevelCoordinator({
       screenY: number;
     }> = [];
     const time = clock.elapsedTime;
+    const segmentCenter = segmentCenterRef.current;
 
     for (const plot of plots) {
       const [x, y] = getTelescopeRegionPlotPosition(region, plot, time);
@@ -217,15 +239,15 @@ function ExplorationLabelLevelCoordinator({
 function ExplorationPlot({
   plot,
   region,
-  segmentCenter,
+  segmentCenterRef,
   labelLevels,
   selectedPlotId,
   onSelect,
 }: {
   plot: UserPlotRow;
   region: TelescopeRegionDefinition;
-  /** 選択セグメント中心（統一空間） */
-  segmentCenter: readonly [number, number];
+  /** 選択セグメント中心（統一空間・スムーズ追従） */
+  segmentCenterRef: SegmentCenterRef;
   labelLevels: LabelLevelsRef;
   selectedPlotId: string;
   onSelect: (id: string) => void;
@@ -238,11 +260,14 @@ function ExplorationPlot({
   const lineRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const nearbyRef = useRef(false);
+  const visualOpacity = useRef(1);
+  const visualScale = useRef(1);
   const nowPlacement = useRef<LabelPlacement>({ level: 0, side: 'up' });
+  const labelFontSize = labelFontSizePx();
   const color = useMemo(() => plotColorFromRow(plot), [plot]);
   const isSelected = plot.word_id === selectedPlotId;
 
-  useFrame(({ camera, clock }) => {
+  useFrame(({ camera, clock }, delta) => {
     const group = groupRef.current;
     const core = coreRef.current;
     if (!group || !core) {
@@ -251,6 +276,7 @@ function ExplorationPlot({
     const time = clock.elapsedTime;
     const [x, y] = getTelescopeRegionPlotPosition(region, plot, time);
     group.position.set(x, y, 0.04);
+    const segmentCenter = segmentCenterRef.current;
 
     // 選択可否＝選択セグメント中心からの距離。感情空間ルール外の点は除外済み
     const isNearby =
@@ -259,17 +285,29 @@ function ExplorationPlot({
         TELESCOPE_EXPLORATION_VIEW.nearbyRadius;
     nearbyRef.current = isNearby;
 
+    const targetOpacity = isSelected
+      ? 1
+      : isNearby
+        ? 0.92
+        : TELESCOPE_EXPLORATION_VIEW.distantOpacity;
+    const targetScale = isSelected || isNearby
+      ? 1
+      : TELESCOPE_EXPLORATION_VIEW.distantScale;
+    const blend = 1 - Math.exp(-delta * PLOT_VISUAL_SMOOTH);
+    visualOpacity.current = THREE.MathUtils.lerp(
+      visualOpacity.current,
+      targetOpacity,
+      blend,
+    );
+    visualScale.current = THREE.MathUtils.lerp(
+      visualScale.current,
+      targetScale,
+      blend,
+    );
+
     const material = core.material as THREE.MeshBasicMaterial;
-    if (isSelected) {
-      material.opacity = 1;
-      group.scale.setScalar(1);
-    } else if (isNearby) {
-      material.opacity = 0.92;
-      group.scale.setScalar(1);
-    } else {
-      material.opacity = TELESCOPE_EXPLORATION_VIEW.distantOpacity;
-      group.scale.setScalar(TELESCOPE_EXPLORATION_VIEW.distantScale);
-    }
+    material.opacity = visualOpacity.current;
+    group.scale.setScalar(visualScale.current);
 
     if (hitRef.current) {
       hitRef.current.visible = isNearby || isSelected;
@@ -376,7 +414,7 @@ function ExplorationPlot({
             width: 0,
             height: 0,
             opacity: 0,
-            transition: 'opacity 200ms ease',
+            transition: 'opacity 340ms ease',
           }}
         >
           <div
@@ -390,7 +428,7 @@ function ExplorationPlot({
               background: color,
               boxShadow: `0 0 5px ${color}88`,
               transition:
-                'height 240ms cubic-bezier(0.22, 0.61, 0.36, 1), top 240ms cubic-bezier(0.22, 0.61, 0.36, 1), bottom 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+                'height 320ms cubic-bezier(0.22, 0.61, 0.36, 1), top 320ms cubic-bezier(0.22, 0.61, 0.36, 1), bottom 320ms cubic-bezier(0.22, 0.61, 0.36, 1)',
             }}
           />
           <div
@@ -404,12 +442,12 @@ function ExplorationPlot({
               writingMode: 'vertical-rl',
               textOrientation: 'upright',
               whiteSpace: 'nowrap',
-              fontSize: LABEL_FONT_SIZE_PX,
+              fontSize: labelFontSize,
               letterSpacing: '0.1em',
               color,
               textShadow: '0 0 6px rgba(0,0,0,0.55)',
               transition:
-                'top 240ms cubic-bezier(0.22, 0.61, 0.36, 1), bottom 240ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+                'top 320ms cubic-bezier(0.22, 0.61, 0.36, 1), bottom 320ms cubic-bezier(0.22, 0.61, 0.36, 1)',
             }}
           >
             {plot.word_id}
@@ -439,10 +477,36 @@ export function Layer4ExplorationLayer({
   selectedPlotId,
   onSelectPlot,
 }: Layer4ExplorationLayerProps) {
-  const segmentCenter = useMemo<[number, number]>(() => {
+  const segmentCenterTarget = useMemo<[number, number]>(() => {
     const [cx, cy] = getLayer3SegmentWorldCenter(region, selectedSegmentIndex);
     return [cx, cy];
   }, [region, selectedSegmentIndex]);
+  const segmentCenterRef = useRef<[number, number]>([
+    segmentCenterTarget[0],
+    segmentCenterTarget[1],
+  ]);
+  const segmentCenterInitialized = useRef(false);
+
+  useFrame((_, delta) => {
+    const current = segmentCenterRef.current;
+    if (!segmentCenterInitialized.current) {
+      current[0] = segmentCenterTarget[0];
+      current[1] = segmentCenterTarget[1];
+      segmentCenterInitialized.current = true;
+      return;
+    }
+    const blend = 1 - Math.exp(-delta * SEGMENT_VISUAL_SMOOTH);
+    current[0] = THREE.MathUtils.lerp(
+      current[0],
+      segmentCenterTarget[0],
+      blend,
+    );
+    current[1] = THREE.MathUtils.lerp(
+      current[1],
+      segmentCenterTarget[1],
+      blend,
+    );
+  });
 
   const selectablePlots = useMemo(
     () =>
@@ -458,7 +522,7 @@ export function Layer4ExplorationLayer({
       <ExplorationLabelLevelCoordinator
         plots={selectablePlots}
         region={region}
-        segmentCenter={segmentCenter}
+        segmentCenterRef={segmentCenterRef}
         selectedPlotId={selectedPlotId}
         levels={labelLevels}
       />
@@ -467,7 +531,7 @@ export function Layer4ExplorationLayer({
           key={plot.word_id}
           plot={plot}
           region={region}
-          segmentCenter={segmentCenter}
+          segmentCenterRef={segmentCenterRef}
           labelLevels={labelLevels}
           selectedPlotId={selectedPlotId}
           onSelect={onSelectPlot}

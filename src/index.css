@@ -19,6 +19,9 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
+  /* 本文中のリンクを踏んでページ遷移する瞬間、ここが白いと一瞬ホワイトアウトして見えるため、
+     各ページの背景と馴染むダークトーンを既定にしておく。 */
+  background-color: #05070f;
 }
 
 body {
@@ -40,5 +43,6 @@ body {
 }
 
 .site-page-fade-in {
-  animation: site-page-fade-in 0.4s ease both;
+  background-color: #05070f;
+  animation: site-page-fade-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

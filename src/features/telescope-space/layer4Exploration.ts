@@ -11,6 +11,8 @@ import type { TelescopeFocusCameraPose } from './focusCameraView';
 export const TELESCOPE_EXPLORATION_VIEW = {
   fov: 72,
   moveMs: 720,
+  /** 矢印でのセグメント移動時の注視点スライド時間 */
+  segmentMoveMs: 1080,
   /** 注視点からのカメラ後退量（面内法線方向） */
   cameraBack: 0.54,
   /** 右寄りオフセット */
@@ -19,14 +21,70 @@ export const TELESCOPE_EXPLORATION_VIEW = {
   cameraHeight: 0.47,
   /** 注視点まわりの視点回転（レイヤー3と同方向） */
   cameraYaw: 0.32,
-  /** ドラッグによる注視点まわり回転の感度（rad/px） */
-  rotateSensitivity: 0.0075,
+  /**
+   * 円形／楕円ドラッグの回転ゲイン。
+   * 指が楕円上を回った角度（rad）がそのまま camera yaw に加算される倍率。
+   */
+  orbitGain: 1,
+  /**
+   * 矢印HUD・見回し操作で共有する楕円の扁平率（縦半径 / 横半径）。
+   * 画面は y 下向き。atan2((y-cy)/ecc, x-cx) で角度を取る。
+   */
+  orbitEcc: 0.57,
+  /**
+   * 接眼中心からの正規化半径がこれ未満のときは角度が暴れるので無視する。
+   * 1 = 接眼円の縁（短辺の半分を基準にした楕円半径）。
+   */
+  orbitDeadzone: 0.14,
   /** 選択セグメント中心からクリック可能とみなす半径（統一空間） */
   nearbyRadius: 0.5,
   /** 近傍外の点の不透明度倍率 */
   distantOpacity: 0.28,
   distantScale: 0.42,
 } as const;
+
+/** ポインタの楕円軌道上の角度（rad）。画面座標は y 下向き。 */
+export function explorationOrbitAngle(
+  clientX: number,
+  clientY: number,
+  centerX: number,
+  centerY: number,
+  ecc = TELESCOPE_EXPLORATION_VIEW.orbitEcc,
+): number {
+  return Math.atan2((clientY - centerY) / ecc, clientX - centerX);
+}
+
+/**
+ * 楕円で正規化した中心からの距離（1 ≒ 接眼円の縁）。
+ * halfSize はキャンバス短辺の半分。
+ */
+export function explorationOrbitRadiusNorm(
+  clientX: number,
+  clientY: number,
+  centerX: number,
+  centerY: number,
+  halfSize: number,
+  ecc = TELESCOPE_EXPLORATION_VIEW.orbitEcc,
+): number {
+  if (halfSize <= 1e-6) {
+    return 0;
+  }
+  const nx = (clientX - centerX) / halfSize;
+  const ny = (clientY - centerY) / (halfSize * ecc);
+  return Math.hypot(nx, ny);
+}
+
+/** -π〜π に畳み込んだ角度差（to - from） */
+export function wrapAngleDelta(from: number, to: number): number {
+  let delta = to - from;
+  while (delta > Math.PI) {
+    delta -= Math.PI * 2;
+  }
+  while (delta < -Math.PI) {
+    delta += Math.PI * 2;
+  }
+  return delta;
+}
 
 /** レイヤー4 HUD（矢印・引き出し線）と共有するカメラ・選択点状態 */
 export interface TelescopeExplorationHudState {
