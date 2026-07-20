@@ -11,7 +11,7 @@ export function IntroLogoScreen({ atLogoStep }: IntroLogoScreenProps) {
   return (
     <div className="home-intro-logo">
       <IntroFlowerLogo atLogoStep={atLogoStep} />
-      <div className="home-intro-logo__text">
+      <div className={`home-intro-logo__text ${atLogoStep ? '' : 'home-intro-logo__text--leaving'}`}>
         <p className="home-intro-logo__mark">{SITE_NAME}</p>
       </div>
     </div>

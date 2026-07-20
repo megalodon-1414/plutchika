@@ -14,12 +14,13 @@ export interface BodyTextSegment {
   linkTo?: string;
 }
 
-/** ようこそパネル用。フック・見出し・サブコピーは左揃え、本文は右揃え。 */
+/** ようこそパネル用。フック・見出しは左揃え。サブコピーは任意。本文も左揃え。 */
 export interface WelcomePanelContent {
   layout: 'welcome';
   hook: string;
   heading: string;
-  subcopy: string;
+  /** 省略可。指定時のみ見出し下に表示する。 */
+  subcopy?: string;
   body: BodyTextSegment[];
 }
 

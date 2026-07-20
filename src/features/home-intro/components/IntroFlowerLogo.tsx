@@ -32,8 +32,10 @@ const HUB_REST_RADIUS = 34;
 /** 静止時、花全体を画面中央からどれだけ左へ寄せるか（画面幅に対する比率）。右側にワードマークを置くレイアウト用。 */
 const HUB_REST_OFFSET_X_RATIO = 0.23;
 
-/** progressの収束速度（指数減衰）。CSS側の2.25sクロスフェードとおおむね揃う（元の5倍ゆっくり）。 */
-const PROGRESS_LERP_SPEED = 1.4;
+/** ロゴ離脱時（花びら散開・中心球の受け渡し）の収束速度。 */
+const PROGRESS_SCATTER_SPEED = 3.2;
+/** ロゴ復帰時（花びら集合・中心球の縮小）の収束速度。戻りがダレないよう散開より速くする。 */
+const PROGRESS_GATHER_SPEED = 8;
 
 function getPetalPlaneAngle(emotionAngle: number): number {
   return ((90 - emotionAngle) * Math.PI) / 180;
@@ -61,9 +63,21 @@ function FlowerScene({ atLogoStep }: { atLogoStep: boolean }) {
   const petalMaterialRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
   const progress = useRef(atLogoStep ? 0 : 1);
   const progressTarget = useRef(atLogoStep ? 0 : 1);
+  /** 一度でもロゴを離れて散開を始めたか。復帰時の集合モーション保証に使う。 */
+  const hasScatteredRef = useRef(!atLogoStep);
 
   useEffect(() => {
-    progressTarget.current = atLogoStep ? 0 : 1;
+    if (atLogoStep) {
+      // 復帰時：progress が集合済み寄りのまま残っているとモーションが飛ばされるので、
+      // 散開経験がある場合は散開端から集合をやり直す。
+      if (hasScatteredRef.current && progress.current < 0.2) {
+        progress.current = 1;
+      }
+      progressTarget.current = 0;
+    } else {
+      hasScatteredRef.current = true;
+      progressTarget.current = 1;
+    }
   }, [atLogoStep]);
 
   const petalGeometry = useMemo(() => {
@@ -86,7 +100,8 @@ function FlowerScene({ atLogoStep }: { atLogoStep: boolean }) {
   );
 
   useFrame((_, delta) => {
-    const lerpT = 1 - Math.exp(-PROGRESS_LERP_SPEED * delta);
+    const lerpSpeed = progressTarget.current > progress.current ? PROGRESS_SCATTER_SPEED : PROGRESS_GATHER_SPEED;
+    const lerpT = 1 - Math.exp(-lerpSpeed * delta);
     progress.current = THREE.MathUtils.lerp(progress.current, progressTarget.current, lerpT);
     const eased = easeOutCubic(progress.current);
 
@@ -115,13 +130,19 @@ function FlowerScene({ atLogoStep }: { atLogoStep: boolean }) {
     const planetCenterY = apexY - planetRadius;
     // 花びらは常に「花の錨点」(restX, 0)へ収束するので、中心球も静止時はそこに揃える
     // （花の中心＝旧参考実装と同じ見た目）。PlanetGlobeの球は常に画面中央(x=0)なので、
-    // 中心球はX方向にも受け渡し先へ補間する。
+    // 散開時の中心球はX方向にも受け渡し先へ補間する。
     const restX = -size.width * HUB_REST_OFFSET_X_RATIO;
     const restY = 0;
 
-    const hubRadius = THREE.MathUtils.lerp(HUB_REST_RADIUS, planetRadius, eased);
-    const hubX = THREE.MathUtils.lerp(restX, 0, eased);
-    const hubY = THREE.MathUtils.lerp(restY, planetCenterY, eased);
+    // ロゴ復帰（gather）時は惑星から戻るモーションにせず、花の中心に固定したまま
+    // 花びらの集合と同期して不透明度だけ上げる（だんだんと濃く現れさせる）。
+    // ロゴ離脱（scatter）時だけ、位置・半径をPlanetGlobeへ補間して受け渡し演出にする。
+    const isGathering = progressTarget.current === 0;
+    const hubRadius = isGathering
+      ? HUB_REST_RADIUS
+      : THREE.MathUtils.lerp(HUB_REST_RADIUS, planetRadius, eased);
+    const hubX = isGathering ? restX : THREE.MathUtils.lerp(restX, 0, eased);
+    const hubY = isGathering ? restY : THREE.MathUtils.lerp(restY, planetCenterY, eased);
 
     if (flowerAnchorRef.current) {
       flowerAnchorRef.current.position.set(restX, restY, 0);

@@ -297,16 +297,14 @@ function WelcomePanelLayout({
   const leftWidth = skyWidth * 0.5;
   // 見出し「PLUTCHIKA(ぷるちか)へようこそ」が途中で折り返さないよう、フック・サブコピーより広めの幅を確保する。
   const headingWidth = skyWidth * 0.7;
-  // 本文（右揃え）の右端は、NavigationIndicatorと常に24px空くようpx単位で正確に計算する
-  // （インジケーターが表示される640px以上のときのみ。640px未満は非表示になるため元の比率のままでよい）。
-  const rightX =
+  const bodyFontSize = skyHeight * 0.029;
+  // 本文は左揃え。末尾の孤立行を防ぐため折り返し幅を文字数ぶん広げ、
+  // 右端のNavigationIndicatorと重ならないよう最大幅も抑える。
+  const bodyMaxRight =
     skyWidth >= NAV_INDICATOR_NARROW_BREAKPOINT_PX
       ? skyWidth / 2 - (NAV_INDICATOR_RIGHT_OFFSET_PX + NAV_INDICATOR_WIDTH_PX + NAV_INDICATOR_TEXT_GAP_PX)
       : skyWidth * 0.42;
-  const bodyFontSize = skyHeight * 0.029;
-  // 折り返し幅を文字数4つ分ほど広げ、「か?」「です。」のような孤立した末尾の1〜2文字が
-  // 単独の行にならないようにする。
-  const rightWidth = skyWidth * 0.48 + bodyFontSize * 8;
+  const bodyWidth = Math.min(skyWidth * 0.72 + bodyFontSize * 4, bodyMaxRight - leftX);
   return (
     <>
       <PanelHtmlText
@@ -337,31 +335,33 @@ function WelcomePanelLayout({
         opacity={opacity}
         role="heading"
       />
-      <PanelHtmlText
-        text={content.subcopy}
-        x={leftX}
-        startY={skyHeight * 0.5}
-        maxWidth={leftWidth}
-        fontSize={skyHeight * 0.024}
-        lineHeight={1.5}
-        color="#c39bd3"
-        letterSpacing="0.06em"
-        anchorX="left"
-        textAlign="left"
-        opacity={opacity}
-        role="subcopy"
-      />
+      {content.subcopy ? (
+        <PanelHtmlText
+          text={content.subcopy}
+          x={leftX}
+          startY={skyHeight * 0.5}
+          maxWidth={leftWidth}
+          fontSize={skyHeight * 0.024}
+          lineHeight={1.5}
+          color="#c39bd3"
+          letterSpacing="0.06em"
+          anchorX="left"
+          textAlign="left"
+          opacity={opacity}
+          role="subcopy"
+        />
+      ) : null}
       <LinkedBodyText
         segments={content.body}
-        x={rightX}
-        startY={skyHeight * 0.42}
-        maxWidth={rightWidth}
+        x={leftX}
+        startY={skyHeight * (content.subcopy ? 0.5 : 0.58)}
+        maxWidth={bodyWidth}
         fontSize={bodyFontSize}
         lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#c39bd3"
-        anchorX="right"
-        textAlign="right"
+        anchorX="left"
+        textAlign="left"
         opacity={opacity}
         onNavigate={onNavigate}
       />
