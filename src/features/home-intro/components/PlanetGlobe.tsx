@@ -40,8 +40,8 @@ type PanelTextRole = 'hook' | 'heading' | 'subcopy' | 'body';
 const PANEL_TEXT_ROLE_CLASS: Record<PanelTextRole, string> = {
   hook: 'home-intro-panel-text home-intro-panel-text--hook font-momochidori font-momochidori--medium',
   heading: 'home-intro-panel-text home-intro-panel-text--heading font-momochidori font-momochidori--bold',
-  subcopy: 'home-intro-panel-text home-intro-panel-text--subcopy font-momochidori font-momochidori--semibold',
-  body: 'home-intro-panel-text home-intro-panel-text--body font-momochidori font-momochidori--medium',
+  subcopy: 'home-intro-panel-text home-intro-panel-text--subcopy',
+  body: 'home-intro-panel-text home-intro-panel-text--body',
 };
 
 function anchorTransformFor(anchorX: 'left' | 'right' | 'center'): string {
@@ -295,6 +295,8 @@ function WelcomePanelLayout({
 }: PanelLayoutProps & { content: WelcomePanelContent }) {
   const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.5;
+  // 見出し「PLUTCHIKA(ぷるちか)へようこそ」が途中で折り返さないよう、フック・サブコピーより広めの幅を確保する。
+  const headingWidth = skyWidth * 0.7;
   // 本文（右揃え）の右端は、NavigationIndicatorと常に24px空くようpx単位で正確に計算する
   // （インジケーターが表示される640px以上のときのみ。640px未満は非表示になるため元の比率のままでよい）。
   const rightX =
@@ -325,7 +327,7 @@ function WelcomePanelLayout({
         text={content.heading}
         x={leftX}
         startY={skyHeight * PANEL_HEADING_Y}
-        maxWidth={leftWidth}
+        maxWidth={headingWidth}
         fontSize={skyHeight * 0.068}
         lineHeight={1.22}
         color="#f4ecf7"
@@ -646,7 +648,7 @@ function DualWheelPanelLayout({
           </div>
           <div
             key={combined?.name ?? 'none'}
-            className={`dual-wheel-badge font-momochidori font-momochidori--bold${combined ? ' dual-wheel-badge--active' : ''}`}
+            className={`dual-wheel-badge${combined ? ' dual-wheel-badge--active' : ''}`}
             style={{
               fontSize: '2.05em',
               backgroundColor: combined?.color ?? 'transparent',

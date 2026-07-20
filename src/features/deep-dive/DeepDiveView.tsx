@@ -61,7 +61,7 @@ export function DeepDiveView() {
         panelContents={PANEL_CONTENTS}
         snapToInitialStep={initialIndex !== 0}
       />
-      <IntroWalker stepping={isAnimating} />
+      <IntroWalker stepping={isAnimating} revealed />
       <NavigationIndicator stages={NAV_INDICATOR_STAGES} currentIndex={activeIndex} onSelect={goTo} />
     </div>
   );

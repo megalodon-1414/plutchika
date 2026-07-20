@@ -7,16 +7,18 @@ interface IntroWalkerProps {
    * アニメ終了後も forwards で消えたままになる。
    */
   boarding?: boolean;
+  /** false の間は非表示（opacity:0）。true になった瞬間からfade inする（ロゴの次のページが完全に表示され終えてから登場させる用）。 */
+  revealed: boolean;
 }
 
 /** 後ろ姿の人物。惑星の頂点（画面中央）に固定し、位置は動かさず足踏みのみで歩行感を出す。 */
-export function IntroWalker({ stepping, boarding = false }: IntroWalkerProps) {
+export function IntroWalker({ stepping, boarding = false, revealed }: IntroWalkerProps) {
   const modifier = boarding
     ? 'home-intro-walker--board'
     : stepping
       ? 'home-intro-walker--step'
       : 'home-intro-walker--idle';
-  const rootClassName = `home-intro-walker ${modifier}`;
+  const rootClassName = `home-intro-walker ${modifier}${revealed ? '' : ' home-intro-walker--hidden'}`;
 
   return (
     <div className={rootClassName}>
