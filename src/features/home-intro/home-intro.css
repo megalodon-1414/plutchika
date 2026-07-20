@@ -13,8 +13,6 @@
   color: #f4ecf7;
   touch-action: none;
   overscroll-behavior: none;
-  font-family: var(--font-family-momochidori);
-  font-feature-settings: 'palt' 1;
 }
 
 /*
@@ -26,7 +24,9 @@
 .home-intro-crossfade {
   position: absolute;
   inset: 0;
-  transition: opacity 0.45s ease;
+  /* ①ロゴ⇔歩行シーンの切り替えのみで使う。3D花ロゴの散開・中心球の受け渡し演出が
+     はっきり見える速さにするため、意図的にゆっくりめ（元の0.45sの5倍）にしてある。 */
+  transition: opacity 2.25s ease;
 }
 
 .home-intro-crossfade--visible {
@@ -39,58 +39,54 @@
   pointer-events: none;
 }
 
-/* ①ロゴ画面 */
+/* ①ロゴ画面。花（IntroFlowerLogo、左寄り）とワードマーク（右寄り）を左右に分ける。 */
 .home-intro-logo {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
-  font-family: var(--font-family-momochidori);
-  font-feature-settings: 'palt' 1;
+}
+
+.home-intro-logo__text {
+  position: absolute;
+  top: 50%;
+  left: 68%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .home-intro-logo__text {
+    left: 50%;
+  }
 }
 
 .home-intro-logo__mark {
   margin: 0;
-  font-size: clamp(2.35rem, 7vw, 3.85rem);
-  font-variation-settings: 'wght' 720, 'wdth' 108;
+  font-family: 'futura-pt', sans-serif;
+  font-weight: 400;
+  font-style: normal;
+  font-size: clamp(3.06rem, 9.1vw, 5.01rem);
   letter-spacing: 0.18em;
   color: #f4ecf7;
   line-height: 1.1;
 }
 
-.home-intro-logo__hint {
-  margin: 0;
-  font-size: 0.8rem;
-  font-variation-settings: 'wght' 500, 'wdth' 100;
-  letter-spacing: 0.34em;
-  color: #9f8aaa;
-  animation: home-intro-hint-pulse 1.8s ease-in-out infinite;
-}
-
-/* 惑星パネル上のテキスト階層（Html 描画・百千鳥） */
+/* 惑星パネル上のテキスト階層（Html 描画）。見出し・フックのみ百千鳥、それ以外（サブコピー・本文）は
+   サイト共通のTOT-雫花角丸ゴシック（index.cssの--font-family-app）を body から継承する。 */
 .home-intro-panel-text {
   margin: 0;
-  font-family: var(--font-family-momochidori);
-  font-feature-settings: 'palt' 1;
 }
 
 .home-intro-panel-text--hook {
+  font-family: var(--font-family-momochidori);
+  font-feature-settings: 'palt' 1;
   font-variation-settings: 'wght' 500, 'wdth' 100;
 }
 
 .home-intro-panel-text--heading {
+  font-family: var(--font-family-momochidori);
+  font-feature-settings: 'palt' 1;
   font-variation-settings: 'wght' 760, 'wdth' 102;
-}
-
-.home-intro-panel-text--subcopy {
-  font-variation-settings: 'wght' 620, 'wdth' 100;
-}
-
-.home-intro-panel-text--body {
-  font-variation-settings: 'wght' 480, 'wdth' 100;
 }
 
 /* 2層パララックス背景（星空／惑星） */
@@ -135,6 +131,14 @@
   height: 58px;
   transform: translate(-50%, -100%);
   z-index: 5;
+  opacity: 1;
+  transition: opacity 0.8s ease-out;
+}
+
+/* ロゴの次のページに来る人物専用。ページが完全に表示され終える（ロゴのフェードアウト完了）まで隠しておく。 */
+.home-intro-walker--hidden {
+  opacity: 0;
+  transition: none;
 }
 
 .home-intro-walker__head {
@@ -220,9 +224,7 @@
   top: 16px;
   left: 20px;
   z-index: 3;
-  font-family: var(--font-family-momochidori);
   font-size: 0.92rem;
-  font-variation-settings: 'wght' 520, 'wdth' 100;
   letter-spacing: 0.08em;
   color: #f4ecf7;
   text-decoration: none;
@@ -237,15 +239,6 @@
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes home-intro-hint-pulse {
-  0%, 100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
   }
 }
 
@@ -353,9 +346,10 @@
   border-radius: 999px;
   background: rgba(20, 28, 64, 0.55);
   color: #f4ecf7;
-  font-family: var(--font-family-momochidori);
+  /* <button>はUAスタイルシートでbodyのfont-family/font-weightを継承しないため明示する。 */
+  font-family: inherit;
+  font-weight: inherit;
   font-size: 1.02rem;
-  font-variation-settings: 'wght' 650, 'wdth' 100;
   letter-spacing: 0.12em;
   cursor: pointer;
   backdrop-filter: blur(4px);
@@ -420,6 +414,9 @@
   gap: 16px;
   background: none;
   border: none;
+  /* <button>はUAスタイルシートでbodyのfont-family/font-weightを継承しないため明示する（子の.nav-indicator__labelはここから継承）。 */
+  font-family: inherit;
+  font-weight: inherit;
   padding: 8px 0;
   margin: 0;
   cursor: pointer;
@@ -427,9 +424,7 @@
 }
 
 .nav-indicator__label {
-  font-family: var(--font-family-momochidori);
   font-size: 0.84rem;
-  font-variation-settings: 'wght' 500, 'wdth' 100;
   letter-spacing: 0.08em;
   color: rgba(190, 230, 200, 0.5);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
@@ -474,7 +469,6 @@
 
 .nav-indicator__stage--current .nav-indicator__label {
   color: #ffffff;
-  font-variation-settings: 'wght' 700, 'wdth' 100;
 }
 
 .nav-indicator__stage--current .nav-indicator__dot {
@@ -521,7 +515,6 @@
 }
 
 .nav-indicator__previous-text {
-  font-family: var(--font-family-momochidori);
   font-size: 8.8px;
   fill: rgba(180, 235, 190, 0.6);
   letter-spacing: 0.6px;
@@ -554,8 +547,6 @@
   min-height: 1.4em;
   border-radius: 0.32em;
   color: #ffffff;
-  font-family: var(--font-family-momochidori);
-  font-variation-settings: 'wght' 750, 'wdth' 100;
   letter-spacing: 0.06em;
   text-align: center;
   transition:

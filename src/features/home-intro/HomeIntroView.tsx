@@ -59,6 +59,9 @@ export function HomeIntroView() {
   // opacityをtransitionさせ、完全に透明になった側だけtransitionendでアンマウントする。
   const [logoMounted, setLogoMounted] = useState(isLogoStep);
   const [walkMounted, setWalkMounted] = useState(!isLogoStep);
+  // ロゴの次のページに来る人物は、ロゴ⇔歩行シーンのクロスフェードが完全に終わってからfade inさせたい。
+  // 直接歩行ステップへ着地した場合（URLの?step=など）は待つ理由がないので最初から表示する。
+  const [walkerRevealed, setWalkerRevealed] = useState(!isLogoStep);
   const [wasLogoStep, setWasLogoStep] = useState(isLogoStep);
   if (wasLogoStep !== isLogoStep) {
     setWasLogoStep(isLogoStep);
@@ -127,10 +130,12 @@ export function HomeIntroView() {
           onTransitionEnd={(event) => {
             if (event.target === event.currentTarget && !isLogoStep) {
               setLogoMounted(false);
+              // ロゴが完全に消えた＝次のページ（歩行シーン）が完全に表示され終えたタイミングで、人物をfade inさせる。
+              setWalkerRevealed(true);
             }
           }}
         >
-          <IntroLogoScreen />
+          <IntroLogoScreen atLogoStep={isLogoStep} />
         </div>
       )}
 
@@ -151,7 +156,7 @@ export function HomeIntroView() {
           />
           {isBoardingStep && <BoardingRocket phase={rocketPhase} />}
           {isBoardingStep && boardingStatus === 'launching' && <div className="home-intro-launch-dim" />}
-          <IntroWalker stepping={isAnimating} boarding={boardingStatus !== 'idle'} />
+          <IntroWalker stepping={isAnimating} boarding={boardingStatus !== 'idle'} revealed={walkerRevealed} />
           {isBoardingStep && boardingStatus !== 'launching' && (
             <div className="home-intro-board-cta">
               <button
