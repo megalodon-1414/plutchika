@@ -127,6 +127,8 @@ export interface PlanetFlagInfo {
   radiusPx: number;
   /** 選択中か。布を消しポールを伸ばす */
   selected?: boolean;
+  /** 登場を遅らせる秒数（ロード時の旗はジェムのフェードインに合わせる） */
+  appearDelaySec?: number;
 }
 
 /** 旗の表示サイズ(px)。ポールの高さに相当し、下半分が星にめり込む */
@@ -136,6 +138,8 @@ export const FLAG_SIZE_MOBILE = 110;
 const FLAG_GROW_DURATION = 0.45;
 /** 選択時にポールが3倍まで伸びる時間(秒) */
 export const FLAG_POLE_EXTEND_DURATION = 0.55;
+/** ロード時の旗：ジェム（uiReveal）と同じく着陸後に出す遅延（秒） */
+export const FLAG_LOAD_APPEAR_DELAY_SEC = 3.3 + 0.6;
 
 /** 星の表面に刺さった1本の旗。出現時は地面から生える。
  *  選択時は布を消し、画面に対してまっすぐなままポールを3倍まで伸ばす */
@@ -170,10 +174,14 @@ function SurfaceFlag({
       return;
     }
     const t = clock.getElapsedTime();
+    const appearDelay = flag.appearDelaySec ?? 0;
 
-    // 登場時のスケール
+    // 登場時のスケール（ロード旗はジェムと同じ遅延のあとで生やす）
     if (reducedMotion) {
-      grow.scale.setScalar(sizePx);
+      grow.scale.setScalar(t >= appearDelay ? sizePx : 0.001);
+    } else if (t < appearDelay) {
+      grow.scale.setScalar(0.001);
+      bornAtRef.current = null;
     } else {
       if (bornAtRef.current === null) {
         bornAtRef.current = t;
@@ -256,24 +264,39 @@ function SurfaceFlag({
   );
 }
 
-/** 星に刺さった旗のグループ。星の面内回転（rotation.z）に一緒に乗って回る。
-    ピッチ（rotation.x）は球のシルエットを変えないため適用せず、
-    DOM側のクリック領域・吹き出しと画面位置を揃える */
+/** 星に刺さった旗のグループ。星の面内回転（rotation.z）と奥行き回転（rotation.x）に
+ *  一緒に乗り、ジェム選択時は月面と共に奥へ遠ざかる。
+ *  同じグループ内に深度専用の球を置き、ポールのめり込み分を星の手前に出さない */
 function SurfaceFlags({
   accent,
   flags,
   rotationRad,
+  pitchRad,
   centerY,
+  occludeWithDepth = false,
 }: {
   accent: string;
   flags: PlanetFlagInfo[];
   rotationRad: number;
+  pitchRad: number;
   centerY: number;
+  /** 旗専用レイヤー用。色なしの球で深度だけ書き、めり込んだポールを隠す */
+  occludeWithDepth?: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const rotationZRef = useRef(0);
   const { size } = useThree();
   const flagSizePx = size.width <= 640 ? FLAG_SIZE_MOBILE : FLAG_SIZE_DESKTOP;
+  const radius = wordPlanetRadius(size.width);
+  const depthMaterial = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        colorWrite: false,
+        depthWrite: true,
+        depthTest: true,
+      }),
+    [],
+  );
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -282,19 +305,32 @@ function SurfaceFlags({
     }
     const t = 1 - Math.exp(-ROTATION_LERP_SPEED * delta);
     group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, rotationRad, t);
+    group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, pitchRad, t);
     rotationZRef.current = group.rotation.z;
   });
 
   return (
     <group ref={groupRef} position={[0, centerY, 0]}>
+      {occludeWithDepth && (
+        <mesh
+          renderOrder={-1000}
+          scale={radius}
+          material={depthMaterial}
+          frustumCulled={false}
+        >
+          {/* 旗の配置半径と一致する球。OBJ月より幾何がずれない */}
+          <sphereGeometry args={[1, 64, 48]} />
+        </mesh>
+      )}
       {flags.map((flag) => (
-        <SurfaceFlag
-          key={flag.id}
-          accent={accent}
-          flag={flag}
-          sizePx={flagSizePx}
-          groupRotationZRef={rotationZRef}
-        />
+        <group key={flag.id} renderOrder={1}>
+          <SurfaceFlag
+            accent={accent}
+            flag={flag}
+            sizePx={flagSizePx}
+            groupRotationZRef={rotationZRef}
+          />
+        </group>
       ))}
     </group>
   );
@@ -312,21 +348,30 @@ function PlanetScene({
   accent,
   rotationRad,
   pitchRad,
+}: Required<Omit<PlanetSphereProps, 'flags'>>) {
+  return (
+    <Suspense fallback={null}>
+      <MoonMesh accent={accent} rotationRad={rotationRad} pitchRad={pitchRad} />
+    </Suspense>
+  );
+}
+
+function FlagsScene({
+  accent,
+  rotationRad,
+  pitchRad,
   flags,
 }: Required<Omit<PlanetSphereProps, 'flags'>> & { flags: PlanetFlagInfo[] }) {
   const centerY = usePlanetCenterY();
   return (
-    <>
-      <Suspense fallback={null}>
-        <MoonMesh accent={accent} rotationRad={rotationRad} pitchRad={pitchRad} />
-      </Suspense>
-      <SurfaceFlags
-        accent={accent}
-        flags={flags}
-        rotationRad={rotationRad}
-        centerY={centerY}
-      />
-    </>
+    <SurfaceFlags
+      accent={accent}
+      flags={flags}
+      rotationRad={rotationRad}
+      pitchRad={pitchRad}
+      centerY={centerY}
+      occludeWithDepth
+    />
   );
 }
 
@@ -345,8 +390,7 @@ export function PlanetSphere({
   accent = '#8b9dc1',
   rotationRad = 0,
   pitchRad = 0,
-  flags = [],
-}: PlanetSphereProps) {
+}: Omit<PlanetSphereProps, 'flags'>) {
   return (
     <Canvas
       orthographic
@@ -358,6 +402,33 @@ export function PlanetSphere({
       <ambientLight intensity={0.75} />
       <directionalLight position={[0.4, 1, 1]} intensity={1} />
       <PlanetScene
+        accent={accent}
+        rotationRad={rotationRad}
+        pitchRad={pitchRad}
+      />
+    </Canvas>
+  );
+}
+
+/** 旗専用レイヤー。ロケット(z=3)より手前(z=4)に描き、重なり時は旗を優先する。
+ *  めり込んだポールと星の裏へ回った旗は、同グループの深度球で隠す */
+export function PlantedFlagsLayer({
+  accent = '#8b9dc1',
+  rotationRad = 0,
+  pitchRad = 0,
+  flags = [],
+}: PlanetSphereProps) {
+  return (
+    <Canvas
+      orthographic
+      camera={{ position: [0, 0, 2000], near: 1, far: 10000, zoom: 1 }}
+      gl={{ alpha: true, antialias: true }}
+      dpr={[1, 1.5]}
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 4 }}
+    >
+      <ambientLight intensity={0.75} />
+      <directionalLight position={[0.4, 1, 1]} intensity={1} />
+      <FlagsScene
         accent={accent}
         rotationRad={rotationRad}
         pitchRad={pitchRad}

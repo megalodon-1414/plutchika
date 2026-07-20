@@ -6,6 +6,8 @@
  *   フェーズA: カメラの目の前に機体の底（ノズル）をカメラへ向けて巨大に現れる
  *   フェーズB: 奥へ飛び去りながら機体を起こし、着陸地点の上空でホバリング位置へ
  *   フェーズC: 減速しながら垂直降下して接地
+ * 離陸（Mapに戻る）はホーム導入の搭乗ロケットに合わせる：
+ *   上昇 → 画面外で機首転換 → カメラへ突っ込んで画面を埋める
  * 炎は機体に追従する3Dのコーンで表現する。砂埃・接地影はCSS側が担当。
  */
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
@@ -18,6 +20,19 @@ const ROCKET_OBJ_URL = '/models/rocket.obj';
 
 /** 着陸シーケンス全体の秒数。CSS側の --landing-time と一致させること。 */
 const LANDING_TIME = 3.3;
+
+/** 離陸①：垂直上昇して画面外へ消えるまでの時間 */
+const TAKEOFF_ASCEND_S = 0.9;
+/** 離陸：炎が出るまでの点火の溜め */
+const TAKEOFF_FLAME_DELAY_S = 0.2;
+/** 離陸②：画面外で向きを変える間 */
+const TAKEOFF_TURN_PAUSE_S = 0.2;
+/** 離陸③：機首をこちらへ向けてカメラへ突っ込む時間 */
+const TAKEOFF_DIVE_S = 0.7;
+
+/** 呼び出し側が /telescope へ遷移するタイマーに使う長さ（ms）。 */
+export const ROCKET_TAKEOFF_TOTAL_MS =
+  (TAKEOFF_ASCEND_S + TAKEOFF_TURN_PAUSE_S + TAKEOFF_DIVE_S) * 1000;
 
 const CAMERA_FOV = 42;
 const CAMERA_DIST = 24;
@@ -37,8 +52,17 @@ function easeOutCubic(t: number): number {
   return 1 - (1 - t) ** 3;
 }
 
+function easeInCubic(t: number): number {
+  return t ** 3;
+}
+
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+/** 離陸用。最初はほとんど動かず、後半で爆発的に加速する強いイーズイン。 */
+function easeInQuint(t: number): number {
+  return t ** 5;
 }
 
 function clamp01(t: number): number {
@@ -55,6 +79,8 @@ interface RocketSceneProps {
   surfaceAngleRad: number;
   /** 星の奥方向（X軸まわり）への目標回転角（ラジアン）。負で星の裏側へ回り込む。 */
   surfacePitchRad: number;
+  /** true のとき離陸シーケンスを再生する */
+  takingOff: boolean;
   reducedMotion: boolean;
 }
 
@@ -64,6 +90,7 @@ function RocketScene({
   feetBottomPx,
   surfaceAngleRad,
   surfacePitchRad,
+  takingOff,
   reducedMotion,
 }: RocketSceneProps) {
   const obj = useLoader(OBJLoader, ROCKET_OBJ_URL);
@@ -75,6 +102,8 @@ function RocketScene({
   /** 球体ライドの現在角（なめらかに目標へ追従させる） */
   const rideAngleRef = useRef(0);
   const ridePitchRef = useRef(0);
+  /** 離陸開始時刻（clock）。null なら未開始 */
+  const takeoffStartedAtRef = useRef<number | null>(null);
 
   const model = useMemo(() => {
     const clone = obj.clone(true);
@@ -162,6 +191,64 @@ function RocketScene({
       });
     };
 
+    if (takingOff) {
+      if (takeoffStartedAtRef.current === null) {
+        takeoffStartedAtRef.current = clock.getElapsedTime();
+      }
+      const elapsed = clock.getElapsedTime() - takeoffStartedAtRef.current;
+      spin.rotation.y = LANDED_YAW;
+
+      if (reducedMotion) {
+        pivot.scale.setScalar(worldHeight * 8);
+        pivot.position.set(0, 0, CAMERA_DIST - worldHeight * 4);
+        pivot.rotation.set(-Math.PI / 2, 0, 0);
+        setFlame(0, 0);
+        return;
+      }
+
+      const ascendEnd = TAKEOFF_ASCEND_S;
+      const turnEnd = ascendEnd + TAKEOFF_TURN_PAUSE_S;
+
+      if (elapsed < ascendEnd) {
+        // 発射①：ふわっと浮いたあと爆発的に加速しながら画面上方へ
+        const t = easeInQuint(clamp01(elapsed / TAKEOFF_ASCEND_S));
+        pivot.scale.setScalar(worldHeight);
+        pivot.position.set(0, landedY + size.height * 1.6 * unitsPerPixel * t, 0);
+        pivot.rotation.set(0, 0, 0);
+        const flameOn = elapsed >= TAKEOFF_FLAME_DELAY_S;
+        setFlame(flameOn ? 0.75 : 0, flameOn ? 1.35 : 0);
+        return;
+      }
+
+      if (elapsed < turnEnd) {
+        // 発射②：画面外で機首をカメラへ向ける（見えない）
+        pivot.scale.setScalar(worldHeight * 0.001);
+        pivot.position.set(0, size.height * 0.2 * unitsPerPixel, 0);
+        pivot.rotation.set(-Math.PI / 2, 0, 0);
+        setFlame(0, 0);
+        return;
+      }
+
+      // 発射③：機首をこちらへ向け、遠くから一気に近づいて画面を埋める
+      const diveT = clamp01((elapsed - turnEnd) / TAKEOFF_DIVE_S);
+      const grow = easeInCubic(diveT);
+      const startZ = CAMERA_DIST - (worldHeight * 0.5 + 0.6);
+      const farZ = -CAMERA_DIST * 0.35;
+      const z = THREE.MathUtils.lerp(farZ, startZ, grow);
+      const fillBoost = 1 + grow * 2.4;
+      pivot.scale.setScalar(worldHeight * fillBoost);
+      pivot.position.set(
+        0,
+        THREE.MathUtils.lerp(size.height * 0.15 * unitsPerPixel, 0, grow),
+        z,
+      );
+      pivot.rotation.set(-Math.PI / 2, 0, 0);
+      setFlame(0.55 * (1 - grow), 1.1);
+      return;
+    }
+
+    takeoffStartedAtRef.current = null;
+
     if (reducedMotion) {
       pivot.scale.setScalar(worldHeight);
       applyLandedPose();
@@ -230,10 +317,12 @@ function RocketScene({
       {/* 見えない遮蔽円盤：深度だけ書き込み、星の裏側(z<0)へ回り込んだロケットを隠す。
           球体だと透視投影で描画中の星（平行投影）より大きく映ってしまうため、
           z=0平面の円盤にして輪郭を画面上の星とぴったり一致させる */}
-      <mesh position={[0, planetCenterYWorld, 0]} renderOrder={-1}>
-        <circleGeometry args={[planetRWorld - 0.05, 64]} />
-        <meshBasicMaterial colorWrite={false} side={THREE.DoubleSide} />
-      </mesh>
+      {!takingOff && (
+        <mesh position={[0, planetCenterYWorld, 0]} renderOrder={-1}>
+          <circleGeometry args={[planetRWorld - 0.05, 64]} />
+          <meshBasicMaterial colorWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      )}
       <group ref={pivotRef}>
       <group ref={spinRef}>
         <primitive object={model} />
@@ -277,6 +366,8 @@ interface RocketModelProps {
   surfaceAngleRad?: number;
   /** 星の奥方向への目標回転角（ラジアン）。負で星の裏側へ回り込む。 */
   surfacePitchRad?: number;
+  /** true のとき離陸シーケンスを再生する */
+  takingOff?: boolean;
 }
 
 export function RocketModel({
@@ -285,6 +376,7 @@ export function RocketModel({
   feetBottom,
   surfaceAngleRad = 0,
   surfacePitchRad = 0,
+  takingOff = false,
 }: RocketModelProps) {
   const reducedMotion = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -296,7 +388,13 @@ export function RocketModel({
       camera={{ position: [0, 0, CAMERA_DIST], fov: CAMERA_FOV, near: 0.1, far: 200 }}
       gl={{ alpha: true, antialias: true }}
       dpr={[1, 2]}
-      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 3 }}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        pointerEvents: 'none',
+        /* 離陸の画面埋め中はUIより手前に出す */
+        zIndex: takingOff ? 12 : 3,
+      }}
     >
       <ambientLight intensity={0.8} />
       <directionalLight position={[0.5, 1, 1]} intensity={1.1} />
@@ -307,6 +405,7 @@ export function RocketModel({
           feetBottom={feetBottom}
           surfaceAngleRad={surfaceAngleRad}
           surfacePitchRad={surfacePitchRad}
+          takingOff={takingOff}
           reducedMotion={reducedMotion}
         />
       </Suspense>

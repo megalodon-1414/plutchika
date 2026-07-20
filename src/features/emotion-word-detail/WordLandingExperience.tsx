@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { getBasicEmotion, getEmotionById, isBasicEmotionId } from '../../data/emotions';
 import { ROUTES } from '../../routes/paths';
 import type { UserPlotRow } from '../../types/userPlot';
@@ -7,9 +7,13 @@ import type { EmotionUiTheme } from '../../utils/emotionUiTheme';
 import { getEmotionWordSlug } from '../../utils/emotionWordSlug';
 import { wordTypeLabel } from '../../utils/emotionWordsBridge';
 import { OctahedronIcon } from './OctahedronIcon';
-import { PlanetSphere, wordPlanetRadius, FLAG_POLE_EXTEND_DURATION, FLAG_SIZE_DESKTOP, FLAG_SIZE_MOBILE } from './PlanetSphere';
+import { PlanetSphere, PlantedFlagsLayer, wordPlanetRadius, FLAG_POLE_EXTEND_DURATION, FLAG_SIZE_DESKTOP, FLAG_SIZE_MOBILE, FLAG_LOAD_APPEAR_DELAY_SEC } from './PlanetSphere';
 import { FLAG_EXPAND_POLE_SCALE } from './FlagModel';
-import { RocketModel } from './RocketModel';
+import { RocketModel, ROCKET_TAKEOFF_TOTAL_MS } from './RocketModel';
+import { buildTelescopeRestoreState } from '../telescope-space/telescopeRestore';
+
+/** Mapに戻る：人物がロケットへ歩いて乗り込む時間（CSSの personBoard と一致） */
+const PERSON_BOARD_MS = 900;
 
 interface WordLandingExperienceProps {
   plot: UserPlotRow;
@@ -110,11 +114,13 @@ function GemButtonContent({
   color,
   selected = false,
   size = 150,
+  side = 'left',
 }: {
   label: string;
   color: string;
   selected?: boolean;
   size?: number;
+  side?: 'left' | 'right';
 }) {
   return (
     <>
@@ -125,7 +131,30 @@ function GemButtonContent({
       >
         <OctahedronIcon color={color} size={size} active={selected} />
       </span>
-      {!selected && <span className="word-landing__choice-bubble">{label}</span>}
+      {!selected && (
+        <span className="word-landing__choice-callout" aria-hidden>
+          <svg
+            className="word-landing__choice-leader"
+            viewBox="0 0 56 28"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            {side === 'left' ? (
+              /* 左ジェム → 右下のラベル */
+              <>
+                <path d="M2 4 L20 22 L54 22" />
+                <circle cx="2" cy="4" r="2.1" />
+              </>
+            ) : (
+              /* 右ジェム → 左下のラベル */
+              <>
+                <path d="M54 4 L36 22 L2 22" />
+                <circle cx="54" cy="4" r="2.1" />
+              </>
+            )}
+          </svg>
+          <span className="word-landing__choice-label">{label}</span>
+        </span>
+      )}
     </>
   );
 }
@@ -138,6 +167,7 @@ export function WordLandingExperience({
   plot,
   uiTheme,
 }: WordLandingExperienceProps) {
+  const navigate = useNavigate();
   const [sentence, setSentence] = useState('');
   const [flags, setFlags] = useState<PlantedFlag[]>([]);
   const [expandedFlagId, setExpandedFlagId] = useState<string | null>(null);
@@ -153,6 +183,12 @@ export function WordLandingExperience({
   const [flagsFocused, setFlagsFocused] = useState(false);
   /** 旗からロケットの横へ歩いて戻っている最中か（移動をゆっくりにして歩きに見せる） */
   const [returningHome, setReturningHome] = useState(false);
+  /** Mapに戻る：人物が乗り込んでいるあいだ */
+  const [boarding, setBoarding] = useState(false);
+  /** Mapに戻る：ロケット離陸演出中。終わると /telescope へ遷移する */
+  const [takingOff, setTakingOff] = useState(false);
+  const takeoffTimerRef = useRef<number | null>(null);
+  const boardTimerRef = useRef<number | null>(null);
   /** このセッション中に刺した旗。地面から生えるアニメーションを付ける
       （ページ読込時からある旗は着陸演出に合わせて遅れて現れる） */
   const sessionPlantedIdsRef = useRef(new Set<string>());
@@ -334,15 +370,25 @@ export function WordLandingExperience({
         : 0;
   const planetPitchRad = rotationPanel !== null || flagFocusSpot !== null ? -0.22 : 0;
 
-  /** 基準位置を球体の回転ぶんだけ回した配置（位置＋傾き）を返す。liftPxで半径方向に浮かせられる */
-  const placeOnSurface = (x: number, bottomPx: number, liftPx = 0, yaw = planetRotationDelta) => {
+  /** 基準位置を球体の回転ぶんだけ回した配置（位置＋傾き）を返す。
+   *  liftPxで半径方向に浮かせられる。pitch は奥行き回転（ロケットと同じ式） */
+  const placeOnSurface = (
+    x: number,
+    bottomPx: number,
+    liftPx = 0,
+    yaw = planetRotationDelta,
+    pitch = 0,
+  ) => {
     const p = toPolar(x, bottomPx);
     const a = p.angle + yaw;
     const r = p.radius + liftPx;
+    const radialY = r * Math.cos(a);
     return {
       x: r * Math.sin(a),
-      bottom: surface.centerBottom + r * Math.cos(a),
+      bottom: surface.centerBottom + radialY * Math.cos(pitch),
       angleRad: a,
+      /** 正で手前、負で奥（カメラが +Z にある前提） */
+      depthZ: radialY * Math.sin(pitch),
     };
   };
 
@@ -357,24 +403,29 @@ export function WordLandingExperience({
 
   /** 人物の画面上の立ち位置。意味表示中はジェムの左側（画面左下）へ、
       旗を立てる表示中はジェムの右側（画面右下）へ歩いて移動する。
-      旗を刺しに行くときは植え場所へ。刺したあとも旗の左側に留まる */
-  const personCurrentX = personPlantPlace
-    ? personPlantPlace.x - 12
-    : flagsFocused && focusedFlagPlace
-      ? focusedFlagPlace.x - 12
-      : rotationPanel === 'meaning' ? -110 : rotationPanel === 'compose' ? personX + 60 : personX;
+      旗を刺しに行くときは植え場所へ。刺したあとも旗の左側に留まる。
+      Mapへ戻るときはロケット中央へ乗り込んで消える */
+  const personCurrentX = boarding
+    ? 6
+    : personPlantPlace
+      ? personPlantPlace.x - 12
+      : flagsFocused && focusedFlagPlace
+        ? focusedFlagPlace.x - 12
+        : rotationPanel === 'meaning' ? -110 : rotationPanel === 'compose' ? personX + 60 : personX;
   /** 人物の足元の高さ。
    * 旗選択中・植え後フォーカス中は、刺さった旗の根元に合わせて一段下げる
    * （expandedFlagId だけでは flagsFocused が立たないため、選択中もここで下げる） */
-  const personBottom = personPlantPlace
-    ? personPlantPlace.bottom - 20
-    : (flagsFocused || expandedFlagIndex >= 0) && focusedFlagPlace
-      ? focusedFlagPlace.bottom - 20
-      : expandedFlagIndex >= 0
-        ? surface.surfaceBottom - 20
-        : rotationPanel !== null
-          ? surface.surfaceBottom - 30
-          : surface.surfaceBottom;
+  const personBottom = boarding
+    ? surface.surfaceBottom
+    : personPlantPlace
+      ? personPlantPlace.bottom - 20
+      : (flagsFocused || expandedFlagIndex >= 0) && focusedFlagPlace
+        ? focusedFlagPlace.bottom - 20
+        : expandedFlagIndex >= 0
+          ? surface.surfaceBottom - 20
+          : rotationPanel !== null
+            ? surface.surfaceBottom - 30
+            : surface.surfaceBottom;
 
   // 星が回転して立ち位置が変わる間、人物に歩行モーションを付ける
   const [personWalking, setPersonWalking] = useState(false);
@@ -388,9 +439,10 @@ export function WordLandingExperience({
     const timer = window.setTimeout(() => setPersonWalking(false), 850);
     return () => window.clearTimeout(timer);
   }, [planetRotationDelta]);
-  /** 惑星回転の歩行タイマーが終了しても、植え場所への移動中・帰り道は歩行を継続する */
+  /** 惑星回転の歩行タイマーが終了しても、植え場所への移動中・帰り道・乗込中は歩行を継続する */
   const personIsWalking =
     personWalking
+    || boarding
     || planting?.phase === 'walk-across'
     || planting?.phase === 'walk-depth'
     || returningHome;
@@ -474,10 +526,80 @@ export function WordLandingExperience({
     );
   };
 
+  /** Mapに戻る：パネル／旗を閉じ、人が乗り込んでからロケット離陸→黒フェードアウト→/telescope */
+  const handleReturnToMap = () => {
+    if (boarding || takingOff) {
+      return;
+    }
+    if (activePanel !== null) {
+      setActivePanel(null);
+      setClosingPanel(activePanel);
+    }
+    setRotationPanel(null);
+    setExpandedFlagId(null);
+    setFlagScrollReady(false);
+    if (flagScrollTimerRef.current !== null) {
+      window.clearTimeout(flagScrollTimerRef.current);
+      flagScrollTimerRef.current = null;
+    }
+    setFlagsFocused(false);
+    setReturningHome(false);
+    setPlanting(null);
+    setBeamPhase('off');
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const clearDepartureTimers = () => {
+      if (boardTimerRef.current !== null) {
+        window.clearTimeout(boardTimerRef.current);
+        boardTimerRef.current = null;
+      }
+      if (takeoffTimerRef.current !== null) {
+        window.clearTimeout(takeoffTimerRef.current);
+        takeoffTimerRef.current = null;
+      }
+    };
+    clearDepartureTimers();
+
+    const startLaunch = () => {
+      setBoarding(false);
+      setTakingOff(true);
+      takeoffTimerRef.current = window.setTimeout(() => {
+        navigate(ROUTES.telescopeSpace, {
+          state: buildTelescopeRestoreState(plot),
+        });
+        takeoffTimerRef.current = null;
+      }, reducedMotion ? 280 : ROCKET_TAKEOFF_TOTAL_MS + 120);
+    };
+
+    if (reducedMotion) {
+      startLaunch();
+      return;
+    }
+
+    /* ①ロケットへ歩いて乗り込む → ②離陸 */
+    setBoarding(true);
+    setPersonWalking(true);
+    boardTimerRef.current = window.setTimeout(() => {
+      boardTimerRef.current = null;
+      startLaunch();
+    }, PERSON_BOARD_MS);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (boardTimerRef.current !== null) {
+        window.clearTimeout(boardTimerRef.current);
+      }
+      if (takeoffTimerRef.current !== null) {
+        window.clearTimeout(takeoffTimerRef.current);
+      }
+    };
+  }, []);
+
   /** 旗を選択する。ジェムパネル表示中でもパネルを閉じて旗を中央へ回す。
    * ポールが伸び終わってから巻物の文章枠を出す */
   const selectFlag = (flagId: string) => {
-    if (planting !== null) {
+    if (boarding || takingOff || planting !== null) {
       return;
     }
     const nextId = expandedFlagId === flagId ? null : flagId;
@@ -503,7 +625,7 @@ export function WordLandingExperience({
   };
 
   const togglePanel = (panel: LandingPanel) => {
-    if (planting !== null) {
+    if (boarding || takingOff || planting !== null) {
       return;
     }
     if (activePanel === panel) {
@@ -663,6 +785,33 @@ export function WordLandingExperience({
           align-items: flex-start;
           gap: 16px;
           animation: uiReveal .5s ease-out calc(var(--landing-time) + .3s) both;
+        }
+        .word-landing__header-back {
+          padding: 8px 13px;
+          border-radius: 8px;
+          font: inherit;
+          font-size: 0.76rem;
+          letter-spacing: 0.06em;
+          cursor: pointer;
+          backdrop-filter: blur(8px);
+        }
+        .word-landing__header-back:disabled {
+          opacity: 0.55;
+          cursor: default;
+        }
+        /* Map遷移時：離陸の終盤で黒へフェードアウト */
+        .word-landing__exit-fade {
+          position: absolute;
+          inset: 0;
+          z-index: 30;
+          background: #000;
+          opacity: 0;
+          pointer-events: none;
+          animation: wordLandingExitFade 0.75s ease-in 1.05s 1 forwards;
+        }
+        @keyframes wordLandingExitFade {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
         .word-landing__identity {
           position: absolute;
@@ -1047,14 +1196,39 @@ export function WordLandingExperience({
           left: 16px;
           transform: none;
         }
-        /* 星の回転で立ち位置が動く間の歩行モーション（ホームのwalkerと同じ振り方） */
-        .word-landing__person.is-walking .word-landing__person-head {
+        /* Mapへ戻る：ロケット中央へ歩きながら、徐々に薄くなって消える */
+        .word-landing__person.is-boarding {
+          /* personArrive の opacity 上書きを外し、乗込用フェードを再生 */
+          animation: personBoardFade 0.9s linear forwards;
+          transition:
+            left .9s cubic-bezier(.35,.5,.3,1),
+            bottom .5s cubic-bezier(.25,.6,.25,1);
+        }
+        @keyframes personBoardFade {
+          0% {
+            opacity: 1;
+          }
+          40% {
+            opacity: 0.72;
+          }
+          75% {
+            opacity: 0.28;
+          }
+          100% {
+            opacity: 0;
+          }
+        }
+        .word-landing__person.is-boarding .word-landing__person-held-flag {
+          opacity: 0;
+          transition: opacity .35s ease;
+        }
+        .word-landing__person.is-boarding .word-landing__person-head {
           animation: personWalkHead .4s ease-in-out infinite;
         }
-        .word-landing__person.is-walking .word-landing__person-leg--left {
+        .word-landing__person.is-boarding .word-landing__person-leg--left {
           animation: personWalkLegLeft .4s ease-in-out infinite;
         }
-        .word-landing__person.is-walking .word-landing__person-leg--right {
+        .word-landing__person.is-boarding .word-landing__person-leg--right {
           animation: personWalkLegRight .4s ease-in-out infinite;
         }
         @keyframes personWalkHead {
@@ -1091,10 +1265,10 @@ export function WordLandingExperience({
         }
         @keyframes personPlant {
           0%, 100% {
-            transform: translateX(-50%) rotate(0deg);
+            transform: translateX(-50%) rotate(0deg) translateY(0);
           }
           40%, 62% {
-            transform: translateX(-50%) rotate(9deg) translateY(3px);
+            transform: translateX(-50%) rotate(22deg) translateY(14px) scale(1.06);
           }
         }
         .word-landing__person.is-planting .word-landing__person-held-flag {
@@ -1102,10 +1276,10 @@ export function WordLandingExperience({
         }
         @keyframes personPlantFlag {
           0%, 100% {
-            transform: rotate(28deg) translateY(0);
+            transform: rotate(28deg) translateY(0) scale(1);
           }
           40%, 62% {
-            transform: rotate(8deg) translateY(8px);
+            transform: rotate(-6deg) translateY(22px) scale(1.18);
           }
         }
         .word-landing__person-held-flag {
@@ -1217,30 +1391,70 @@ export function WordLandingExperience({
             transform: scale(1.08);
           }
         }
-        /* ラベルはジェムの上に浮かぶ、とんがりなしの楕円の吹き出し */
-        .word-landing__choice-bubble {
+        /* ラベルは枠なし。左ジェムは右下、右ジェムは左下へ引き出し線でつなぐ */
+        .word-landing__choice-callout {
           position: absolute;
-          left: 50%;
-          bottom: calc(100% - 6px);
-          transform: translateX(-50%);
-          /* 角が丸くフィレットされた長方形 */
-          padding: 8px 16px;
-          border-radius: 12px;
-          background: rgba(16, 22, 46, .84);
-          border: 1px solid rgba(244, 236, 247, .35);
-          box-shadow: 0 0 14px var(--planet-glow);
-          white-space: nowrap;
-          text-shadow: 0 1px 5px rgba(0,0,0,.85);
+          top: auto;
+          z-index: 1;
+          display: flex;
+          align-items: flex-end;
+          gap: 2px;
           pointer-events: none;
-          animation: bubbleFloat 3s ease-in-out infinite;
         }
-        @keyframes bubbleFloat {
-          0%, 100% {
-            translate: 0 0;
-          }
-          50% {
-            translate: 0 -4px;
-          }
+        .word-landing__choice--left .word-landing__choice-callout {
+          left: calc(100% - 12px);
+          right: auto;
+          bottom: -8%;
+          flex-direction: row;
+        }
+        .word-landing__choice--right .word-landing__choice-callout {
+          /* ジェム寄りに寄せつつ、左と同じ高さ */
+          right: calc(100% - 22px);
+          left: auto;
+          bottom: -8%;
+          flex-direction: row-reverse;
+        }
+        .word-landing__choice-leader {
+          width: 52px;
+          height: 26px;
+          flex: 0 0 auto;
+          overflow: visible;
+          color: color-mix(in srgb, var(--planet-glow) 85%, #fff);
+          filter: drop-shadow(0 0 4px var(--planet-glow));
+        }
+        .word-landing__choice-leader path {
+          fill: none;
+          stroke: currentColor;
+          stroke-width: 1.35;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+        }
+        .word-landing__choice-leader circle {
+          fill: currentColor;
+        }
+        .word-landing__choice-label {
+          margin: 0;
+          padding: 0 0 1px;
+          border: 0;
+          background: transparent;
+          box-shadow: none;
+          white-space: nowrap;
+          font-size: 0.78rem;
+          font-weight: 650;
+          letter-spacing: 0.14em;
+          color: rgba(248, 250, 255, 0.96);
+          text-shadow:
+            0 0 6px var(--planet-glow),
+            0 0 14px var(--planet-glow),
+            0 0 28px var(--planet-glow),
+            0 1px 3px rgba(0, 0, 0, 0.55);
+          filter: drop-shadow(0 0 10px var(--planet-glow));
+        }
+        .word-landing__choice--left .word-landing__choice-label {
+          text-align: left;
+        }
+        .word-landing__choice--right .word-landing__choice-label {
+          text-align: right;
         }
         .word-landing__choice--left {
           animation: uiReveal .5s ease-out calc(var(--landing-time) + .55s) both;
@@ -1266,11 +1480,12 @@ export function WordLandingExperience({
           cursor: pointer;
           transform: translateX(-50%);
           transform-origin: 50% 100%;
-          animation: flagPlant .5s cubic-bezier(.2,.9,.2,1) calc(var(--landing-time) + .65s) both;
+          animation: flagPlant .5s cubic-bezier(.2,.9,.2,1) calc(var(--landing-time) + .6s) both;
           transition:
             left .8s cubic-bezier(.25,.6,.25,1),
             bottom .8s cubic-bezier(.25,.6,.25,1),
             transform .8s cubic-bezier(.25,.6,.25,1),
+            opacity .8s cubic-bezier(.25,.6,.25,1),
             height .55s cubic-bezier(.25,.7,.2,1);
         }
         .word-landing__planted.is-expanded {
@@ -1385,18 +1600,6 @@ export function WordLandingExperience({
           width: 14px;
           height: 14px;
           display: block;
-        }
-        /* ポールの根元に落ちる接地影 */
-        .word-landing__planted-base {
-          position: absolute;
-          left: calc(50% - 22px);
-          bottom: -1px;
-          width: 14px;
-          height: 4px;
-          border-radius: 999px;
-          background: rgba(0,0,0,.35);
-          filter: blur(1px);
-          transform: translateX(-50%);
         }
         /* 100%側でtransformを保持しない（星の回転による傾きをインラインで当てるため） */
         @keyframes flagPlant {
@@ -1600,9 +1803,21 @@ export function WordLandingExperience({
           .word-landing__choice--right .word-landing__choice-shadow {
             margin-left: 14px;
           }
-          .word-landing__choice-bubble {
-            padding: 6px 12px;
+          .word-landing__choice-label {
             font-size: .68rem;
+            letter-spacing: 0.1em;
+          }
+          .word-landing__choice-leader {
+            width: 40px;
+            height: 22px;
+          }
+          .word-landing__choice--left .word-landing__choice-callout {
+            left: calc(100% - 8px);
+            bottom: -6%;
+          }
+          .word-landing__choice--right .word-landing__choice-callout {
+            right: calc(100% - 16px);
+            bottom: -6%;
           }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -1616,6 +1831,10 @@ export function WordLandingExperience({
           .word-landing__rocket::after,
           .word-landing__rocket-shadow {
             animation: none;
+          }
+          .word-landing__exit-fade {
+            animation: none;
+            opacity: 1;
           }
           .word-landing__word-beam {
             display: none;
@@ -1669,23 +1888,22 @@ export function WordLandingExperience({
             /telescope/{getEmotionWordSlug(plot)}
           </p>
         </div>
-        <Link
-          to={ROUTES.emotionMap}
+        <button
+          type="button"
+          className="word-landing__header-back"
+          onClick={handleReturnToMap}
+          disabled={boarding || takingOff}
           style={{
-            padding: '8px 13px',
             border: `1px solid ${uiTheme.accentBorder}`,
-            borderRadius: 8,
             color: uiTheme.textPrimary,
-            textDecoration: 'none',
-            fontSize: '0.76rem',
-            letterSpacing: '0.06em',
             background: uiTheme.panelBackground,
-            backdropFilter: 'blur(8px)',
           }}
         >
           Map に戻る
-        </Link>
+        </button>
       </header>
+
+      {takingOff && <div className="word-landing__exit-fade" aria-hidden />}
 
       <section
         className={`word-landing__identity${activePanel !== null || closingPanel !== null ? ' has-panel' : ''}`}
@@ -1955,7 +2173,7 @@ export function WordLandingExperience({
               className="word-landing__rocket"
               aria-label={`${plot.word_id}の星に着陸したロケット`}
               style={{
-                opacity: rotationPanel !== null || flagFocusSpot !== null ? 0 : 1,
+                opacity: takingOff || rotationPanel !== null || flagFocusSpot !== null ? 0 : 1,
                 transition: 'opacity .45s ease',
               }}
             >
@@ -1967,8 +2185,15 @@ export function WordLandingExperience({
               accent={uiTheme.accent}
               heightPx={156}
               feetBottom={(viewportHeight) => viewportHeight * 0.2}
-              surfaceAngleRad={planetRotationDelta}
-              surfacePitchRad={rotationPanel !== null || flagFocusSpot !== null ? -0.5 : 0}
+              surfaceAngleRad={takingOff ? 0 : planetRotationDelta}
+              surfacePitchRad={
+                takingOff
+                  ? 0
+                  : rotationPanel !== null || flagFocusSpot !== null
+                    ? -0.5
+                    : 0
+              }
+              takingOff={takingOff}
             />
 
             {/* 人物は直立のまま。移動が必要なときは歩行モーションで横へ移動する */}
@@ -1976,6 +2201,7 @@ export function WordLandingExperience({
               className={[
                 'word-landing__person',
                 personIsWalking ? 'is-walking' : '',
+                boarding ? 'is-boarding' : '',
                 planting?.phase === 'plant' ? 'is-planting' : '',
               ].filter(Boolean).join(' ')}
               aria-label="ロケットの横に立つ人"
@@ -1983,13 +2209,17 @@ export function WordLandingExperience({
                 left: `calc(50% + ${personCurrentX}px)`,
                 bottom: personBottom,
                 transform: 'translateX(-50%)',
+                opacity: takingOff ? 0 : undefined,
+                pointerEvents: boarding || takingOff ? 'none' : undefined,
                 '--held-flag': uiTheme.accent,
-                /* 旗を刺しに行く間・戻る間は歩幅に合わせて移動し、ワープに見せない */
-                transition: planting
-                  ? 'left .8s cubic-bezier(.35,.5,.3,1), bottom .45s cubic-bezier(.25,.6,.25,1), transform .8s cubic-bezier(.25,.6,.25,1)'
-                  : returningHome
-                    ? 'left 1.4s cubic-bezier(.35,.5,.3,1), bottom .8s cubic-bezier(.25,.6,.25,1), transform .8s cubic-bezier(.25,.6,.25,1)'
-                    : undefined,
+                /* 旗を刺しに行く間・戻る間・乗込中は歩幅に合わせて移動し、ワープに見せない */
+                transition: boarding
+                  ? undefined
+                  : planting
+                    ? 'left .8s cubic-bezier(.35,.5,.3,1), bottom .45s cubic-bezier(.25,.6,.25,1), transform .8s cubic-bezier(.25,.6,.25,1)'
+                    : returningHome
+                      ? 'left 1.4s cubic-bezier(.35,.5,.3,1), bottom .8s cubic-bezier(.25,.6,.25,1), transform .8s cubic-bezier(.25,.6,.25,1)'
+                      : 'opacity .35s ease',
               } as CSSProperties}
             >
               <span className="word-landing__person-held-flag" />
@@ -2018,6 +2248,7 @@ export function WordLandingExperience({
                 label="旗を立てる"
                 color={uiTheme.accent}
                 size={surface.gemSize}
+                side="left"
                 selected={
                   activePanel === 'compose' ||
                   closingPanel === 'compose' ||
@@ -2042,6 +2273,7 @@ export function WordLandingExperience({
                 label="意味を表示"
                 color={uiTheme.accent}
                 size={surface.gemSize}
+                side="right"
                 selected={
                   activePanel === 'meaning' ||
                   closingPanel === 'meaning' ||
@@ -2057,8 +2289,14 @@ export function WordLandingExperience({
         const isExpanded = expandedFlagId === flag.id;
         const showScroll = isExpanded && flagScrollReady;
         const spot = flagSpot(index);
-        // 旗は星の表面に固定されている想定。ロケットと同じく星の回転に乗せて動かす
-        const flagPlace = placeOnSurface(spot.x, spot.bottom, 0, planetRotationDelta);
+        // 旗は星の表面に固定。面内回転に加え、ジェム選択時の奥行き回転にも乗せる
+        const flagPlace = placeOnSurface(
+          spot.x,
+          spot.bottom,
+          0,
+          planetRotationDelta,
+          planetPitchRad,
+        );
         const isNew = sessionPlantedIdsRef.current.has(flag.id);
         const flagSizePx = surface.isMobile ? FLAG_SIZE_MOBILE : FLAG_SIZE_DESKTOP;
         /* 根元固定で3倍伸長したとき、地表から上に見えるポール長 */
@@ -2068,6 +2306,10 @@ export function WordLandingExperience({
         const flagHitH = Math.round(flagSizePx * 0.58);
         /* 従来の枠（約70px）の3倍 */
         const scrollH = 210;
+        /* 奥へ回り込んだ旗は小さく・薄く見せ、十分奥ならクリック不可 */
+        const receding = flagPlace.depthZ < -4;
+        const flagOpacity = isExpanded ? 1 : receding ? Math.max(0.2, 1 + flagPlace.depthZ / 80) : 1;
+        const flagScale = isExpanded ? 1 : receding ? Math.max(0.55, 1 + flagPlace.depthZ / 120) : 1;
         return (
           <div
             key={flag.id}
@@ -2090,10 +2332,12 @@ export function WordLandingExperience({
             style={{
               left: `calc(50% + ${flagPlace.x}px)`,
               bottom: flagPlace.bottom,
+              opacity: flagOpacity,
+              pointerEvents: flagOpacity < 0.28 ? 'none' : undefined,
               /* 選択中は3Dポールと同様に画面に対してまっすぐ立てる */
               transform: isExpanded
                 ? 'translateX(-50%) rotate(0rad)'
-                : `translateX(-50%) rotate(${flagPlace.angleRad}rad)`,
+                : `translateX(-50%) rotate(${flagPlace.angleRad}rad) scale(${flagScale})`,
               '--planted-flag': uiTheme.accent,
               '--planet-glow': uiTheme.accentGlow,
               '--expanded-pole-h': `${expandedPoleH}px`,
@@ -2138,32 +2382,40 @@ export function WordLandingExperience({
                 </button>
               </div>
             )}
-            <span className="word-landing__planted-base" />
           </div>
         );
       })}
 
       {/* 画面上で時計回り正の回転量を、Three.js（反時計回り正）の角度に変換して渡す。
           パネル表示中・旗フォーカス中は手前の面がせり上がる方向（負のピッチ）にも回す。
-          旗は惑星と同じ3Dシーン内で描画し、ポールを月のメッシュに実際に刺す */}
+          旗はロケットより手前の専用レイヤーで描画し、星に刺さった見え方は深度用の月で保つ */}
       <div className="word-landing__planet" aria-hidden>
         <PlanetSphere
           accent={uiTheme.accent}
           rotationRad={-planetRotationDelta}
           pitchRad={planetPitchRad}
-          flags={flags.map((flag, index) => {
-            const spot = flagSpot(index);
-            const polar = toPolar(spot.x, spot.bottom);
-            /* 3D旗は必ず星の半径上に置き、画面幅で極座標半径がズレて星から抜けるのを防ぐ */
-            return {
-              id: flag.id,
-              angleRad: polar.angle,
-              radiusPx: surface.radius,
-              selected: expandedFlagId === flag.id,
-            };
-          })}
         />
       </div>
+      <PlantedFlagsLayer
+        key={getEmotionWordSlug(plot)}
+        accent={uiTheme.accent}
+        rotationRad={-planetRotationDelta}
+        pitchRad={planetPitchRad}
+        flags={flags.map((flag, index) => {
+          const spot = flagSpot(index);
+          const polar = toPolar(spot.x, spot.bottom);
+          const isNew = sessionPlantedIdsRef.current.has(flag.id);
+          /* 3D旗は必ず星の半径上に置き、画面幅で極座標半径がズレて星から抜けるのを防ぐ。
+             ロード時の旗はジェムと同じタイミングまで隠す。今刺した旗はすぐ生やす */
+          return {
+            id: flag.id,
+            angleRad: polar.angle,
+            radiusPx: surface.radius,
+            selected: expandedFlagId === flag.id,
+            appearDelaySec: isNew ? 0 : FLAG_LOAD_APPEAR_DELAY_SEC,
+          };
+        })}
+      />
     </main>
   );
 }

@@ -769,7 +769,34 @@ function TelescopeCameraController({
         layer2SceneRef.current?.(false);
         camera.fov = TELESCOPE_EXPLORATION_VIEW.fov;
         camera.updateProjectionMatrix();
-        // ???????? useFrame ????????????????
+
+        /* 単語詳細から戻ったときなど、確定探索へ直接入った場合は区画へカメラを据える */
+        const plot = explorationPlotId
+          ? wordPlots.find((row) => row.word_id === explorationPlotId)
+          : null;
+        const segmentIndex =
+          explorationSegmentIndex ??
+          (plot ? getLayer3SegmentIndexForPlot(region, plot) : null);
+        if (segmentIndex != null && segmentIndex >= 0) {
+          const lookAt = getLayer3SegmentWorldCenter(region, segmentIndex);
+          const pose = computeTelescopeExplorationCameraPose(region, lookAt);
+          explorationLook.current.set(...lookAt);
+          explorationOffset.current
+            .set(...pose.position)
+            .sub(new THREE.Vector3(...pose.lookAt));
+          explorationYaw.current = 0;
+          lastExplorationPlotId.current = explorationPlotId ?? null;
+          lastExplorationSegmentIndex.current = segmentIndex;
+          applyExplorationPose(
+            camera,
+            region,
+            lookAt,
+            explorationOffset.current,
+            explorationYaw.current,
+          );
+          currentLookAt.current.copy(TMP_LOOK);
+        }
+
       }
     } else if (zoomPhase === 'detail' && focusBasicId) {
       mode.current = 'focus';

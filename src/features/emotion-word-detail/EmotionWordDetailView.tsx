@@ -125,7 +125,7 @@ export function EmotionWordDetailView() {
             </p>
           </div>
           <Link
-            to={ROUTES.emotionMap}
+            to={ROUTES.telescopeSpace}
             style={{
               padding: '8px 14px',
               border: `1px solid ${uiTheme.accentBorder}`,

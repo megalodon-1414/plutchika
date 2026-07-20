@@ -6,7 +6,7 @@ import {
   useState,
   type MutableRefObject,
 } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import { getBasicEmotion, getEmotionById, isBasicEmotionId } from '../../data/emotions';
 import { ExplorationWordInfoPanel } from '../../components/ExplorationWordInfoPanel';
@@ -57,6 +57,12 @@ import { TelescopeEmotionInfoPanel, useTelescopeEmotionInfoMobile } from './Tele
 import { TelescopeCornerMenu } from './TelescopeCornerMenu';
 import { TelescopeSpaceCanvas } from './TelescopeSpaceCanvas';
 import { TelescopeZoomLadder, zoomLevelIndex } from './TelescopeZoomLadder';
+import {
+  resolveTelescopeExplorationRestore,
+  TELESCOPE_RESTORE_STATE_KEY,
+  type TelescopeLocationState,
+} from './telescopeRestore';
+import { getEmotionWordSlug } from '../../utils/emotionWordSlug';
 
 function isBusyPhase(phase: TelescopeZoomPhase): boolean {
   return (
@@ -283,6 +289,8 @@ function getInfoUiScale(): number {
  * 既存 `/map` とは独立。円形接眼の中だけで階層ズームする。
  */
 export function TelescopeSpaceView() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [zoomPhase, setZoomPhase] = useState<TelescopeZoomPhase>('far');
   const [viewFocus, setViewFocus] = useState<TelescopeViewFocus>(EMPTY_FOCUS);
   const [focusBasicId, setFocusBasicId] = useState<BasicEmotionId | null>(null);
@@ -307,6 +315,8 @@ export function TelescopeSpaceView() {
   const explorationArrowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const explorationArrowLabelRefs = useRef<(HTMLDivElement | null)[]>([]);
   const explorationPanelRef = useRef<HTMLElement | null>(null);
+  /** 単語詳細から戻ったときの復元を一度だけ適用する */
+  const restoreAppliedRef = useRef(false);
 
   useEffect(() => {
     let frame = 0;
@@ -342,6 +352,43 @@ export function TelescopeSpaceView() {
       cancelled = true;
     };
   }, []);
+
+  /** 単語詳細の「Mapに戻る」から来たとき、探索レイヤーのその語へ復帰する */
+  useEffect(() => {
+    if (restoreAppliedRef.current || wordPlots.length === 0) {
+      return;
+    }
+    const restore = (location.state as TelescopeLocationState | null)?.[
+      TELESCOPE_RESTORE_STATE_KEY
+    ];
+    if (!restore?.wordId) {
+      return;
+    }
+
+    const plot =
+      wordPlots.find((row) => row.word_id === restore.wordId) ??
+      wordPlots.find((row) => getEmotionWordSlug(row) === restore.wordId);
+    if (!plot) {
+      restoreAppliedRef.current = true;
+      navigate(location.pathname, { replace: true, state: {} });
+      return;
+    }
+
+    const target = resolveTelescopeExplorationRestore(plot);
+    restoreAppliedRef.current = true;
+    navigate(location.pathname, { replace: true, state: {} });
+    if (!target) {
+      return;
+    }
+
+    setFocusBasicId(target.focusBasicId);
+    setSelectedDyadId(target.dyadId);
+    setExplorationPlotId(target.wordId);
+    setExplorationSegmentIndex(target.segmentIndex);
+    setLayer2HudActive(false);
+    /* 5段階目（探索）確定状態へ。意味パネルが出る zoomPhase==='exploration' に直接入る */
+    setZoomPhase('exploration');
+  }, [wordPlots, location.state, location.pathname, navigate]);
 
   const busy = isBusyPhase(zoomPhase);
   const settled = settledFromPhase(zoomPhase);
@@ -1142,7 +1189,9 @@ export function TelescopeSpaceView() {
         </div>
       ) : null}
 
-      {zoomPhase === 'exploration' && selectedExplorationPlot ? (
+      {settled === 'exploration' &&
+      zoomPhase !== 'leaving-exploration' &&
+      selectedExplorationPlot ? (
         <>
           <ExplorationGuideLine
             hud={explorationHudRef}
