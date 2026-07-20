@@ -61,6 +61,26 @@
   transition: opacity 0.35s ease;
 }
 
+/* タイトル画面右下の QR（plutchika.svg） */
+.home-intro-logo__qr {
+  position: absolute;
+  right: max(1.25rem, env(safe-area-inset-right, 0px));
+  bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+  width: 72px;
+  height: 72px;
+  z-index: 2;
+  display: block;
+  border-radius: 6px;
+  opacity: 1;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+.home-intro-logo__qr--leaving {
+  opacity: 0;
+}
+
 @media (max-width: 640px) {
   .home-intro-root {
     /* sceneLayout.ts の HOME_INTRO_HORIZON_RATIO_MOBILE と揃える */
@@ -71,6 +91,13 @@
     /* 水平・垂直とも画面中央。花ロゴはタイトル下（IntroFlowerLogo側で配置）。 */
     top: 45%;
     left: 50%;
+  }
+
+  .home-intro-logo__qr {
+    width: 56px;
+    height: 56px;
+    right: max(1rem, env(safe-area-inset-right, 0px));
+    bottom: max(1rem, env(safe-area-inset-bottom, 0px));
   }
 
   .home-intro-board-title,
