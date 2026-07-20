@@ -477,34 +477,34 @@ function EmotionStar({
           />
         ) : (
           <>
-            <mesh>
-              <sphereGeometry args={[radius, 20, 20]} />
-              <meshStandardMaterial
-                color={color}
-                emissive={color}
-                emissiveIntensity={emissiveBoost}
-                roughness={0.35}
-                metalness={0}
-                toneMapped={false}
-                transparent
-                opacity={opacity}
-                depthWrite={opacity > 0.85}
-              />
-            </mesh>
-            <mesh>
-              <sphereGeometry args={[radius * 2.4, 16, 16]} />
-              <meshBasicMaterial
-                color={color}
-                transparent
-                opacity={opacity * 0.12}
-                depthWrite={false}
-                toneMapped={false}
-              />
-            </mesh>
+      <mesh>
+        <sphereGeometry args={[radius, 20, 20]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={emissiveBoost}
+          roughness={0.35}
+          metalness={0}
+          toneMapped={false}
+          transparent
+          opacity={opacity}
+          depthWrite={opacity > 0.85}
+        />
+      </mesh>
+      <mesh>
+        <sphereGeometry args={[radius * 2.4, 16, 16]} />
+        <meshBasicMaterial
+          color={color}
+          transparent
+          opacity={opacity * 0.12}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
           </>
         )}
 
-        {focused && (
+      {focused && (
           <group ref={orbitLabelRef}>
             <Text
               position={[trackR, 0, 0.03]}
@@ -883,13 +883,13 @@ function Layer2EmotionFloorMarkers({
           >
             <mesh renderOrder={0}>
               <circleGeometry args={[radius, 48]} />
-              <meshBasicMaterial
-                color={color}
-                transparent
+            <meshBasicMaterial
+              color={color}
+              transparent
                 opacity={0}
                 depthWrite={false}
                 depthTest
-                side={THREE.DoubleSide}
+              side={THREE.DoubleSide}
                 toneMapped={false}
               />
             </mesh>
@@ -899,12 +899,12 @@ function Layer2EmotionFloorMarkers({
                 color={color}
                 transparent
                 opacity={0}
-                depthWrite={false}
+              depthWrite={false}
                 depthTest
                 side={THREE.DoubleSide}
-                toneMapped={false}
-              />
-            </mesh>
+              toneMapped={false}
+            />
+          </mesh>
           </group>
         );
       })}
@@ -1214,18 +1214,18 @@ function Layer2EmotionLabel({
       visible={!reveal}
     >
       <Billboard follow lockX={false} lockY={false} lockZ={false}>
-        <mesh>
-          <ringGeometry
+          <mesh>
+            <ringGeometry
             args={[trackRadius - 0.004, trackRadius + 0.004, 64]}
-          />
-          <meshBasicMaterial
-            color={color}
-            transparent
+            />
+            <meshBasicMaterial
+              color={color}
+              transparent
             opacity={0.24}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
+              depthWrite={false}
+              toneMapped={false}
+            />
+          </mesh>
         <mesh ref={centerDotRef} visible={false}>
           <circleGeometry args={[centerDotRadius, 28]} />
           <meshBasicMaterial
@@ -1237,21 +1237,21 @@ function Layer2EmotionLabel({
           />
         </mesh>
         <group ref={orbitRef}>
-          <Text
+            <Text
             position={[trackRadius, 0, 0]}
-            rotation={[0, 0, -Math.PI / 2]}
+              rotation={[0, 0, -Math.PI / 2]}
             fontSize={fontSize}
-            color={color}
-            anchorX="center"
-            anchorY="middle"
+              color={color}
+              anchorX="center"
+              anchorY="middle"
             fillOpacity={0.92}
-            letterSpacing={0.06}
-          >
-            {node.label}
-          </Text>
-        </group>
+              letterSpacing={0.06}
+            >
+              {node.label}
+            </Text>
+          </group>
       </Billboard>
-    </group>
+        </group>
   );
 }
 
@@ -2476,7 +2476,7 @@ export function TelescopeGalaxyLayer({
 
     // Layer2では基本8感情を検知対象から外し、合成感情だけを検知する。
     if (!inFocusView) {
-      for (const node of TELESCOPE_GALAXY_NODES) {
+    for (const node of TELESCOPE_GALAXY_NODES) {
         consider(node, node.color, 1);
       }
     }
@@ -2691,17 +2691,17 @@ export function TelescopeGalaxyLayer({
         : null}
       {!inFocusView
         ? TELESCOPE_GALAXY_NODES.map((node) => {
-            const isSelected = focusBasicId === node.id;
-            const related = !relatedIds || relatedIds.has(node.id);
-            return (
-              <EmotionStar
-                key={node.id}
-                node={node}
-                radius={TELESCOPE_BASIC_SPHERE_RADIUS}
-                color={node.color}
+        const isSelected = focusBasicId === node.id;
+        const related = !relatedIds || relatedIds.has(node.id);
+        return (
+          <EmotionStar
+            key={node.id}
+            node={node}
+            radius={TELESCOPE_BASIC_SPHERE_RADIUS}
+            color={node.color}
                 opacity={1}
                 emissiveBoost={isSelected ? 0.7 : related ? 0.4 : 0.55}
-                focused={focusedId === node.id}
+            focused={focusedId === node.id}
                 pointCloud
               />
             );
@@ -2709,18 +2709,18 @@ export function TelescopeGalaxyLayer({
         : null}
       {!inFocusView
         ? TELESCOPE_DETAIL_NODES.map((node) => {
-            const related = !relatedIds || relatedIds.has(node.id);
+        const related = !relatedIds || relatedIds.has(node.id);
             const opacity = detailVisibility;
             if (opacity < 0.02) {
               return null;
-            }
-            return (
-              <EmotionStar
-                key={node.id}
-                node={node}
-                radius={TELESCOPE_DYAD_SPHERE_RADIUS}
-                color={detailColors.get(node.id) ?? node.color}
-                opacity={opacity}
+        }
+        return (
+          <EmotionStar
+            key={node.id}
+            node={node}
+            radius={TELESCOPE_DYAD_SPHERE_RADIUS}
+            color={detailColors.get(node.id) ?? node.color}
+            opacity={opacity}
                 emissiveBoost={related ? 0.7 : 0.5}
                 focused={focusedId === node.id}
                 pointCloud
