@@ -3,6 +3,7 @@
  *   ポール＝細い円柱、先端＝小さな球、布＝頂点を波打たせた平面。
  * 布は感情固有の色（accent）のトゥーンマテリアルで塗り、風になびかせる。
  * 全体は高さ1・中心原点に収める（呼び出し側のサイズ計算・地面クリップと対）。
+ * 選択時は布を消し、ポールを根元固定のまま上へ伸ばす。
  */
 import { Canvas, useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
@@ -18,11 +19,31 @@ const CLOTH_TOP_Y = 0.48;
 /** 布のなびき */
 const WAVE_AMPLITUDE = 0.035;
 const WAVE_SPEED = 3.2;
+/** 選択時のポール伸長倍率 */
+export const FLAG_EXPAND_POLE_SCALE = 3;
+
+interface FlagShapesProps {
+  color: string;
+  mirrored?: boolean;
+  /** 布の不透明度（0=非表示、1=表示）。変化時は内部でフェードする */
+  clothOpacity?: number;
+  /** ポールの縦方向スケール。1=通常、3=選択時の伸びきり。根元は動かさない */
+  poleScale?: number;
+  /** 風になびく揺れを止める */
+  still?: boolean;
+}
 
 /** 旗のジオメトリ本体。単体のCanvas（FlagModel）と惑星シーン（PlanetSphere）の両方から使う */
-export function FlagShapes({ color, mirrored = false }: { color: string; mirrored?: boolean }) {
+export function FlagShapes({
+  color,
+  mirrored = false,
+  clothOpacity = 1,
+  poleScale = 1,
+  still = false,
+}: FlagShapesProps) {
   const groupRef = useRef<THREE.Group>(null);
   const clothRef = useRef<THREE.Mesh>(null);
+  const clothOpacityRef = useRef(clothOpacity);
   const reducedMotion = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     [],
@@ -39,6 +60,9 @@ export function FlagShapes({ color, mirrored = false }: { color: string; mirrore
         emissive: color,
         emissiveIntensity: 0.12,
         side: THREE.DoubleSide,
+        transparent: true,
+        opacity: clothOpacity,
+        depthWrite: clothOpacity > 0.95,
       }),
     [color],
   );
@@ -51,10 +75,25 @@ export function FlagShapes({ color, mirrored = false }: { color: string; mirrore
     [color],
   );
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const group = groupRef.current;
     const cloth = clothRef.current;
-    if (!group || !cloth || reducedMotion) {
+
+    // 布のフェード（縮み終わりの再表示は少しゆっくり、選択時の消去は速く）
+    const fadeSpeed = clothOpacity > clothOpacityRef.current ? 5.5 : 16;
+    const nextOpacity = reducedMotion
+      ? clothOpacity
+      : THREE.MathUtils.damp(clothOpacityRef.current, clothOpacity, fadeSpeed, delta);
+    clothOpacityRef.current = nextOpacity;
+    clothMaterial.opacity = nextOpacity;
+    clothMaterial.depthWrite = nextOpacity > 0.95;
+    clothMaterial.visible = nextOpacity > 0.01;
+
+    if (!group || reducedMotion || still) {
+      if (group && still) {
+        group.rotation.y = 0;
+        group.rotation.z = 0;
+      }
       return;
     }
     const t = clock.getElapsedTime();
@@ -63,6 +102,9 @@ export function FlagShapes({ color, mirrored = false }: { color: string; mirrore
     group.rotation.y = Math.sin(t * 0.55) * 0.72 + Math.sin(t * 1.3) * 0.14;
     group.rotation.z = Math.sin(t * 0.4 + 1.2) * 0.08;
 
+    if (!cloth || nextOpacity < 0.05) {
+      return;
+    }
     // 布はポール側を固定し、自由端ほど大きく波打たせる
     const position = clothGeometry.attributes.position;
     for (let i = 0; i < position.count; i += 1) {
@@ -77,17 +119,24 @@ export function FlagShapes({ color, mirrored = false }: { color: string; mirrore
     clothGeometry.computeVertexNormals();
   });
 
+  // 根元（y=-0.5）を固定したまま上へ伸ばす
+  const poleOffsetY = (poleScale - 1) * (POLE_HEIGHT / 2);
+
   return (
     <group ref={groupRef} scale={[mirrored ? -1 : 1, 1, 1]}>
       {/* ポール */}
-      <mesh material={poleMaterial}>
+      <mesh
+        material={poleMaterial}
+        scale={[1, poleScale, 1]}
+        position={[0, poleOffsetY, 0]}
+      >
         <cylinderGeometry args={[POLE_RADIUS, POLE_RADIUS, POLE_HEIGHT, 12]} />
       </mesh>
       {/* 先端の飾り球 */}
-      <mesh position={[0, POLE_HEIGHT / 2, 0]} material={knobMaterial}>
+      <mesh position={[0, -POLE_HEIGHT / 2 + poleScale, 0]} material={knobMaterial}>
         <sphereGeometry args={[0.045, 16, 16]} />
       </mesh>
-      {/* 布（ポールの右側に取り付け） */}
+      {/* 布（ポールの右側）。opacity でフェードイン／アウト */}
       <mesh
         ref={clothRef}
         geometry={clothGeometry}

@@ -4,10 +4,10 @@
  * 地平線が画面上端から80%（CSSの --surface-bottom: 20% と対）に来るよう配置する。
  */
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
-import { Suspense, useMemo, useRef } from 'react';
+import { Suspense, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { FlagShapes } from './FlagModel';
+import { FlagShapes, FLAG_EXPAND_POLE_SCALE } from './FlagModel';
 
 const MOON_OBJ_URL = '/models/Moon_2K.obj';
 
@@ -125,38 +125,113 @@ export interface PlanetFlagInfo {
   angleRad: number;
   /** 惑星中心から旗の根元までの距離(px) */
   radiusPx: number;
+  /** 選択中か。布を消しポールを伸ばす */
+  selected?: boolean;
 }
 
 /** 旗の表示サイズ(px)。ポールの高さに相当し、下半分が星にめり込む */
-const FLAG_SIZE_PX = 152;
+export const FLAG_SIZE_DESKTOP = 152;
+export const FLAG_SIZE_MOBILE = 110;
 /** 刺した瞬間に地面から生えるアニメーションの長さ(秒) */
 const FLAG_GROW_DURATION = 0.45;
+/** 選択時にポールが3倍まで伸びる時間(秒) */
+export const FLAG_POLE_EXTEND_DURATION = 0.55;
 
-/** 星の表面に刺さった1本の旗。出現時は地面から生える */
-function SurfaceFlag({ accent, flag }: { accent: string; flag: PlanetFlagInfo }) {
+/** 星の表面に刺さった1本の旗。出現時は地面から生える。
+ *  選択時は布を消し、画面に対してまっすぐなままポールを3倍まで伸ばす */
+function SurfaceFlag({
+  accent,
+  flag,
+  sizePx,
+  groupRotationZRef,
+}: {
+  accent: string;
+  flag: PlanetFlagInfo;
+  sizePx: number;
+  /** SurfaceFlags グループの現在の rotation.z（画面垂直化に使う） */
+  groupRotationZRef: MutableRefObject<number>;
+}) {
   const growRef = useRef<THREE.Group>(null);
+  const orientRef = useRef<THREE.Group>(null);
   const bornAtRef = useRef<number | null>(null);
+  const expandAtRef = useRef<number | null>(null);
+  const wasSelectedRef = useRef(false);
+  const poleScaleRef = useRef(1);
   const reducedMotion = useMemo(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     [],
   );
+  const [poleScale, setPoleScale] = useState(1);
 
-  useFrame(({ clock }) => {
-    const group = growRef.current;
-    if (!group) {
-      return;
-    }
-    if (reducedMotion) {
-      group.scale.setScalar(FLAG_SIZE_PX);
+  useFrame(({ clock }, delta) => {
+    const grow = growRef.current;
+    const orient = orientRef.current;
+    if (!grow) {
       return;
     }
     const t = clock.getElapsedTime();
-    if (bornAtRef.current === null) {
-      bornAtRef.current = t;
+
+    // 登場時のスケール
+    if (reducedMotion) {
+      grow.scale.setScalar(sizePx);
+    } else {
+      if (bornAtRef.current === null) {
+        bornAtRef.current = t;
+      }
+      const progress = Math.min(1, (t - bornAtRef.current) / FLAG_GROW_DURATION);
+      const eased = 1 + (progress - 1) ** 3;
+      grow.scale.setScalar(sizePx * Math.max(0.001, eased));
     }
-    const progress = Math.min(1, (t - bornAtRef.current) / FLAG_GROW_DURATION);
-    const eased = 1 + (progress - 1) ** 3; // easeOutCubic
-    group.scale.setScalar(FLAG_SIZE_PX * Math.max(0.001, eased));
+
+    // 選択開始／終了のタイミングを記録。開始時は即座に画面垂直へスナップしてから伸ばす
+    if (flag.selected && !wasSelectedRef.current) {
+      expandAtRef.current = t;
+      wasSelectedRef.current = true;
+      if (orient) {
+        orient.rotation.z = -groupRotationZRef.current;
+      }
+    } else if (!flag.selected && wasSelectedRef.current) {
+      expandAtRef.current = t;
+      wasSelectedRef.current = false;
+    }
+
+    // ポール伸長（根元固定で1→3）。閉じるときは3→1
+    let nextPole = 1;
+    if (reducedMotion) {
+      nextPole = flag.selected ? FLAG_EXPAND_POLE_SCALE : 1;
+    } else if (expandAtRef.current !== null) {
+      const p = Math.min(1, (t - expandAtRef.current) / FLAG_POLE_EXTEND_DURATION);
+      const eased = 1 - (1 - p) ** 3;
+      if (flag.selected) {
+        nextPole = 1 + (FLAG_EXPAND_POLE_SCALE - 1) * eased;
+      } else {
+        nextPole = FLAG_EXPAND_POLE_SCALE + (1 - FLAG_EXPAND_POLE_SCALE) * eased;
+      }
+    } else if (flag.selected) {
+      nextPole = FLAG_EXPAND_POLE_SCALE;
+    }
+    if (Math.abs(nextPole - poleScaleRef.current) > 0.002) {
+      poleScaleRef.current = nextPole;
+      setPoleScale(nextPole);
+    }
+
+    // 画面に対してポールをまっすぐ立てる。
+    // 非選択時は地表の法線方向（-angleRad）。
+    // 選択時はグループ回転だけ打ち消し、ワールド回転.z = 0（画面垂直）にする。
+    // ※ -angleRad - groupZ だと二重打ち消しになり斜めに伸びてしまう
+    if (orient) {
+      const targetZ = flag.selected
+        ? -groupRotationZRef.current
+        : -flag.angleRad;
+      if (reducedMotion || flag.selected) {
+        // 選択中は伸び始める前に垂直へスナップ／強く追従させる
+        const k = reducedMotion ? 1 : 1 - Math.exp(-18 * delta);
+        orient.rotation.z = THREE.MathUtils.lerp(orient.rotation.z, targetZ, k);
+      } else {
+        const k = 1 - Math.exp(-10 * delta);
+        orient.rotation.z = THREE.MathUtils.lerp(orient.rotation.z, targetZ, k);
+      }
+    }
   });
 
   return (
@@ -166,11 +241,16 @@ function SurfaceFlag({ accent, flag }: { accent: string; flag: PlanetFlagInfo })
         Math.cos(flag.angleRad) * flag.radiusPx,
         0,
       ]}
-      /* 画面上で時計回りの傾き＝Three.jsではrotation.zの負方向 */
-      rotation={[0, 0, -flag.angleRad]}
     >
-      <group ref={growRef} scale={FLAG_SIZE_PX}>
-        <FlagShapes color={accent} />
+      <group ref={orientRef} rotation={[0, 0, -flag.angleRad]}>
+        <group ref={growRef} scale={sizePx}>
+          <FlagShapes
+            color={accent}
+            clothOpacity={flag.selected || poleScale > 1.08 ? 0 : 1}
+            poleScale={poleScale}
+            still={Boolean(flag.selected) || poleScale > 1.05}
+          />
+        </group>
       </group>
     </group>
   );
@@ -191,6 +271,9 @@ function SurfaceFlags({
   centerY: number;
 }) {
   const groupRef = useRef<THREE.Group>(null);
+  const rotationZRef = useRef(0);
+  const { size } = useThree();
+  const flagSizePx = size.width <= 640 ? FLAG_SIZE_MOBILE : FLAG_SIZE_DESKTOP;
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -199,12 +282,19 @@ function SurfaceFlags({
     }
     const t = 1 - Math.exp(-ROTATION_LERP_SPEED * delta);
     group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, rotationRad, t);
+    rotationZRef.current = group.rotation.z;
   });
 
   return (
     <group ref={groupRef} position={[0, centerY, 0]}>
       {flags.map((flag) => (
-        <SurfaceFlag key={flag.id} accent={accent} flag={flag} />
+        <SurfaceFlag
+          key={flag.id}
+          accent={accent}
+          flag={flag}
+          sizePx={flagSizePx}
+          groupRotationZRef={rotationZRef}
+        />
       ))}
     </group>
   );

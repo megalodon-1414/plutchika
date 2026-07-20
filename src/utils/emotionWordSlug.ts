@@ -36,7 +36,7 @@ export function getEmotionWordSlug(plot: UserPlotRow): string {
 }
 
 export function getEmotionWordPath(plot: UserPlotRow): string {
-  return `/map/${getEmotionWordSlug(plot)}`;
+  return `/telescope/${getEmotionWordSlug(plot)}`;
 }
 
 /** 同一スラッグが複数ある場合は先頭を返す */
