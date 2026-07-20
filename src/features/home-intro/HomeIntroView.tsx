@@ -9,6 +9,7 @@ import {
 import type { RocketPhase } from './components/BoardingRocket';
 import { IntroLogoScreen } from './components/IntroLogoScreen';
 import { IntroWalker } from './components/IntroWalker';
+import { HomeStarfield } from './components/HomeStarfield';
 import { NavigationIndicator } from './components/NavigationIndicator';
 import type { NavigationIndicatorStage } from './components/NavigationIndicator';
 import { WalkScene } from './components/WalkScene';
@@ -137,6 +138,7 @@ export function HomeIntroView() {
 
   return (
     <div ref={containerRef} className="home-intro-root">
+      <HomeStarfield />
       {logoMounted && (
         <div
           className={`home-intro-crossfade ${isLogoStep ? 'home-intro-crossfade--visible' : 'home-intro-crossfade--hidden'}`}

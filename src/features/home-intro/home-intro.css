@@ -9,7 +9,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: radial-gradient(circle at 50% 20%, #141c40 0%, #0a0f26 55%, #05070f 100%);
+  background: #05070f;
   color: #f4ecf7;
   touch-action: none;
   overscroll-behavior: none;
@@ -38,7 +38,7 @@
   pointer-events: none;
 }
 
-/* ①ロゴ画面。花（IntroFlowerLogo、左寄り）とワードマーク（右寄り）を左右に分ける。 */
+/* ①ロゴ画面。デスクトップは花（左）とワードマーク（右）。スマホはタイトル中央上・花はその下。 */
 .home-intro-logo {
   position: absolute;
   inset: 0;
@@ -62,8 +62,106 @@
 }
 
 @media (max-width: 640px) {
+  .home-intro-root {
+    /* sceneLayout.ts の HOME_INTRO_HORIZON_RATIO_MOBILE と揃える */
+    --intro-horizon: 94%;
+  }
+
   .home-intro-logo__text {
+    /* 水平・垂直とも画面中央。花ロゴはタイトル下（IntroFlowerLogo側で配置）。 */
+    top: 45%;
     left: 50%;
+  }
+
+  .home-intro-board-title,
+  .home-intro-board-scroll-hint__label,
+  .home-intro-back-link {
+    font-size: 12px;
+  }
+}
+
+/* 本文中リンク：左に伸ばしたピル背景＋右向き三角の左右ゆれ */
+.home-intro-body-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22em;
+  margin: 0 0.08em;
+  /* 左側を少し伸ばして矢印の置き場を確保 */
+  padding: 0.14em 0.62em 0.14em 0.92em;
+  border-radius: 999px;
+  color: inherit;
+  text-decoration: none;
+  pointer-events: auto;
+  cursor: pointer;
+  background-color: rgba(195, 155, 211, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(195, 155, 211, 0.35);
+  /* 行内で少しだけ上に寄せる */
+  position: relative;
+  top: -0.22em;
+  vertical-align: baseline;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.home-intro-body-link__arrow {
+  display: block;
+  flex: none;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0.28em 0 0.28em 0.4em;
+  border-color: transparent transparent transparent currentColor;
+  color: rgba(195, 155, 211, 0.95);
+  animation: home-intro-body-link-arrow-nudge 1.15s ease-in-out infinite;
+}
+
+.home-intro-body-link__label {
+  line-height: inherit;
+}
+
+@keyframes home-intro-body-link-arrow-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(0.22em);
+  }
+}
+
+/* 本文下・左：スクロール誘導の下向き三角（上下に揺れる） */
+.home-intro-body-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.75em;
+  margin-top: 0.85em;
+  pointer-events: none;
+}
+
+.home-intro-body-footer__trailing {
+  margin-left: auto;
+}
+
+.home-intro-body-scroll-hint {
+  display: block;
+  flex: none;
+  width: 0;
+  height: 0;
+  margin-top: 0.15em;
+  border-style: solid;
+  border-width: 0.55em 0.42em 0;
+  border-color: rgba(201, 191, 212, 0.85) transparent transparent;
+  animation: home-intro-body-scroll-hint-bob 1.35s ease-in-out infinite;
+}
+
+@keyframes home-intro-body-scroll-hint-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(0.35em);
   }
 }
 
@@ -94,37 +192,13 @@
   font-family: var(--font-family-momochidori);
   font-feature-settings: 'palt' 1;
   font-variation-settings: 'wght' 760, 'wdth' 102;
+  height: auto;
 }
 
-/* 2層パララックス背景（星空／惑星） */
+/* 歩行シーン（惑星は PlanetGlobe。星空は最奥の HomeStarfield） */
 .home-intro-walkscene {
   position: absolute;
   inset: 0;
-}
-
-/* 最奥：星空。中心（消失点）から生まれ、外側へゆっくり流れながら大きくなる */
-.home-intro-stars {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-}
-
-.home-intro-stars__layer {
-  position: absolute;
-  inset: 0;
-}
-
-.home-intro-stars__dot {
-  position: absolute;
-  left: 50%;
-  top: var(--intro-horizon);
-  /* left/top/width/height は毎フレームJSで直接書き換える。ここでは初期アンカー（消失点＝人物の立ち位置）だけ
-     固定しておく。消失点を画面中央ではなく地平線に揃えることで、人物・地面のシルエットに隠れて見えなくなる。
-     transitionは付けない。球の回転角を毎フレーム直接反映しており、
-     そのライブな値自体が既になめらかにイージングされているため。 */
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: #ffffff;
 }
 
 /* 手前：惑星本体は PlanetGlobe.tsx（Three.js の3Dスフィア、キャンバスは画面全体に position:absolute; inset:0）が描画する */
@@ -633,5 +707,117 @@
     box-shadow:
       0 0 22px 2px var(--dual-wheel-glow-color, transparent),
       0 0 40px 10px var(--dual-wheel-glow-color, transparent);
+  }
+}
+
+/* 「プルチックの感情環とは」スマホ：花びら選択をアイコン起動のオーバーレイに切り離す */
+.home-intro-petal-launcher-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+.home-intro-petal-launcher {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+  margin: 0;
+  padding: 0.28em 0.4em 0.32em;
+  border: 1px solid rgba(244, 236, 247, 0.22);
+  border-radius: 0.7em;
+  background: rgba(10, 14, 32, 0.55);
+  backdrop-filter: blur(10px);
+  color: #d8cfe0;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  appearance: none;
+  font: inherit;
+}
+
+.home-intro-petal-launcher:active {
+  transform: scale(0.96);
+}
+
+.home-intro-petal-launcher__hint {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: #c9bfd4;
+}
+
+.home-intro-petal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  touch-action: none;
+}
+
+.home-intro-petal-overlay__backdrop {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(4, 7, 16, 0.72);
+  cursor: pointer;
+  animation: home-intro-petal-overlay-fade 0.28s ease both;
+}
+
+.home-intro-petal-overlay__panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: min(92vw, 360px);
+  padding: 1.6rem 1.1rem 1.35rem;
+  border: 1px solid rgba(244, 236, 247, 0.18);
+  border-radius: 1.25rem;
+  background: rgba(12, 16, 36, 0.92);
+  backdrop-filter: blur(14px);
+  animation: home-intro-petal-overlay-pop 0.38s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
+.home-intro-petal-overlay__close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.45rem;
+  width: 2rem;
+  height: 2rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #d8cfe0;
+  font-size: 1.55rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@keyframes home-intro-petal-overlay-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes home-intro-petal-overlay-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }

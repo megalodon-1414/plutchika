@@ -1,7 +1,7 @@
 import { Html } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, RefObject } from 'react';
+import type { CSSProperties, ReactNode, RefObject } from 'react';
 import * as THREE from 'three';
 import { PlutchikPetalWheel } from '../../../components/landing/PlutchikPetalWheel';
 import type { BasicEmotionId } from '../../../data/emotions';
@@ -15,7 +15,8 @@ import type {
   WelcomePanelContent,
 } from '../panelContent';
 import { getRotationPerStep } from '../planetRotation';
-import { HOME_INTRO_HORIZON_RATIO } from '../sceneLayout';
+import { HOME_INTRO_HORIZON_RATIO, homeIntroHorizonRatio } from '../sceneLayout';
+import { MobilePetalWheelLauncher } from './MobilePetalWheelLauncher';
 
 /** 角度を [-π, π] に正規化する */
 function normalizeAngle(angle: number): number {
@@ -70,6 +71,10 @@ function PanelHtmlText({
   textAlign,
   opacity,
   role,
+  /** true のとき折り返さず、maxWidth いっぱいまでフォントを拡大／縮小する（スマホ見出し用） */
+  fitToWidth = false,
+  /** fitToWidth 後の実寸（高さは可変）。下要素の積み位置に使う。 */
+  onSizeChange,
 }: {
   text: string;
   x: number;
@@ -83,23 +88,109 @@ function PanelHtmlText({
   textAlign: 'left' | 'right' | 'center';
   opacity: number;
   role: PanelTextRole;
+  fitToWidth?: boolean;
+  onSizeChange?: (size: { width: number; height: number; fontSize: number }) => void;
 }) {
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [fittedSize, setFittedSize] = useState(fontSize);
+  const onSizeChangeRef = useRef(onSizeChange);
+  onSizeChangeRef.current = onSizeChange;
+
+  useLayoutEffect(() => {
+    let cancelled = false;
+    let raf = 0;
+    let attempts = 0;
+
+    const reportSize = (el: HTMLDivElement, nextFontSize: number) => {
+      el.style.fontSize = `${nextFontSize}px`;
+      el.style.width = `${maxWidth}px`;
+      el.style.height = 'auto';
+      el.style.whiteSpace = fitToWidth ? 'nowrap' : 'pre-wrap';
+      onSizeChangeRef.current?.({
+        width: maxWidth,
+        height: el.offsetHeight,
+        fontSize: nextFontSize,
+      });
+    };
+
+    const measure = () => {
+      if (cancelled) {
+        return;
+      }
+      const el = measureRef.current;
+      // Html はポータルで遅れてマウントされることがあるので、付くまで再試行する。
+      if (!el || maxWidth <= 0) {
+        if (attempts < 45) {
+          attempts += 1;
+          raf = requestAnimationFrame(measure);
+        }
+        return;
+      }
+
+      if (!fitToWidth) {
+        setFittedSize(fontSize);
+        reportSize(el, fontSize);
+        return;
+      }
+
+      const probe = 100;
+      el.style.fontSize = `${probe}px`;
+      el.style.whiteSpace = 'nowrap';
+      el.style.width = 'max-content';
+      el.style.height = 'auto';
+      el.style.transform = 'none';
+      const measured = el.scrollWidth;
+      if (measured <= 1) {
+        if (attempts < 45) {
+          attempts += 1;
+          raf = requestAnimationFrame(measure);
+        }
+        return;
+      }
+      // 横幅いっぱいに拡大（わずかに余白）。下限を設けて 12px 固定に見えないようにする。
+      // スマホは本文との差を抑えるため、幅いっぱいより少し控えめに。
+      const filled = probe * (maxWidth / measured) * 0.88;
+      const next = Math.max(20, Math.min(filled, maxWidth * 0.2));
+      setFittedSize(next);
+      reportSize(el, next);
+    };
+
+    measure();
+    void document.fonts.ready.then(() => {
+      if (!cancelled) {
+        attempts = 0;
+        measure();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [fitToWidth, text, maxWidth, fontSize, letterSpacing, role, lineHeight]);
+
+  const resolvedSize = fitToWidth ? fittedSize : fontSize;
+
   return (
-    <Html position={[x, startY, 0]} style={{ pointerEvents: 'none' }}>
+    // transform={false}: オルソ＋大きな world 単位でも CSS スケールで潰さない
+    <Html position={[x, startY, 0]} transform={false} style={{ pointerEvents: 'none' }}>
       <div
+        ref={measureRef}
         className={PANEL_TEXT_ROLE_CLASS[role]}
         style={{
           transform: anchorTransformFor(anchorX),
           width: maxWidth,
-          fontSize,
+          height: 'auto',
+          fontSize: resolvedSize,
           lineHeight,
           color,
           textAlign,
           letterSpacing,
           opacity,
           transition: 'opacity 0.2s linear',
-          wordBreak: 'break-word',
-          whiteSpace: 'pre-wrap',
+          wordBreak: fitToWidth ? 'normal' : 'break-word',
+          whiteSpace: fitToWidth ? 'nowrap' : 'pre-wrap',
+          overflow: 'visible',
         }}
       >
         {text}
@@ -146,6 +237,11 @@ interface TextPanelProps {
   /** 「空」（頂点から画面上端まで）の幅・高さ。テキストはこの範囲内にだけ収める。 */
   skyWidth: number;
   skyHeight: number;
+  /**
+   * 惑星を下げたぶん、文字パネルをローカル＋Yへ持ち上げて画面上の文字位置を維持する。
+   * デスクトップは 0。
+   */
+  textLiftY: number;
   /** 球と回転を共有する親グループへの参照。位置・向きはここから一切動かさず、表示の濃さだけをこの回転から導出する。 */
   rotatingGroupRef: RefObject<THREE.Group | null>;
   /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
@@ -190,6 +286,16 @@ const NAV_INDICATOR_WIDTH_PX = 182; // .nav-indicator の width（1.3倍後）
 const NAV_INDICATOR_NARROW_BREAKPOINT_PX = 640; // .nav-indicator が非表示になる境界と同じ
 /** 本文とインジケーターの間に空ける隙間（px）。 */
 const NAV_INDICATOR_TEXT_GAP_PX = 24;
+/** スマホ時のパネル文字サイズ（フック・見出し・本文とも固定） */
+const MOBILE_PANEL_FONT_PX = 12;
+
+/** デスクトップは skyHeight 比率、スマホ（幅640以下）は 12px 固定。 */
+function panelFontPx(skyWidth: number, skyHeight: number, ratio: number): number {
+  if (skyWidth <= NAV_INDICATOR_NARROW_BREAKPOINT_PX) {
+    return MOBILE_PANEL_FONT_PX;
+  }
+  return skyHeight * ratio;
+}
 
 interface PanelLayoutProps {
   skyWidth: number;
@@ -217,6 +323,8 @@ interface LinkedBodyTextProps {
   textAlign: 'left' | 'right' | 'center';
   opacity: number;
   onNavigate?: (path: string) => void;
+  /** 本文の直後・同じブロック内に置く要素（スマホ花びらアイコンなど） */
+  afterBody?: ReactNode;
 }
 
 /**
@@ -245,41 +353,60 @@ function LinkedBodyText({
   textAlign,
   opacity,
   onNavigate,
+  afterBody,
 }: LinkedBodyTextProps) {
   return (
-    <Html position={[x, startY, 0]} style={{ pointerEvents: 'none' }}>
+    <Html position={[x, startY, 0]} transform={false} style={{ pointerEvents: 'none' }}>
       <div
-        className={PANEL_TEXT_ROLE_CLASS.body}
         style={{
           transform: anchorTransformFor(anchorX),
           width: maxWidth,
-          fontSize,
-          lineHeight,
-          color,
-          textAlign,
           opacity,
           transition: 'opacity 0.2s linear',
-          wordBreak: 'break-word',
-          whiteSpace: 'pre-wrap',
         }}
       >
-        {segments.map((segment, index) =>
-          segment.linkTo ? (
-            <a
-              key={index}
-              href={segment.linkTo}
-              style={{ color: linkColor, pointerEvents: 'auto', cursor: 'pointer', textDecoration: 'underline' }}
-              onClick={(event) => {
-                event.preventDefault();
-                onNavigate?.(segment.linkTo as string);
-              }}
-            >
-              {segment.text}
-            </a>
-          ) : (
-            <span key={index}>{segment.text}</span>
-          ),
-        )}
+        <div
+          className={PANEL_TEXT_ROLE_CLASS.body}
+          style={{
+            width: '100%',
+            fontSize,
+            lineHeight,
+            color,
+            textAlign,
+            wordBreak: 'break-word',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {segments.map((segment, index) =>
+            segment.linkTo ? (
+              <a
+                key={index}
+                href={segment.linkTo}
+                className="home-intro-body-link"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onNavigate?.(segment.linkTo as string);
+                }}
+              >
+                <span className="home-intro-body-link__arrow" aria-hidden />
+                <span
+                  className="home-intro-body-link__label"
+                  style={{ color: linkColor }}
+                >
+                  {segment.text}
+                </span>
+              </a>
+            ) : (
+              <span key={index}>{segment.text}</span>
+            ),
+          )}
+        </div>
+        <div className="home-intro-body-footer">
+          <span className="home-intro-body-scroll-hint" aria-hidden />
+          {afterBody ? (
+            <div className="home-intro-body-footer__trailing">{afterBody}</div>
+          ) : null}
+        </div>
       </div>
     </Html>
   );
@@ -295,9 +422,8 @@ function WelcomePanelLayout({
 }: PanelLayoutProps & { content: WelcomePanelContent }) {
   const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.5;
-  // 見出し「PLUTCHIKA(ぷるちか)へようこそ」が途中で折り返さないよう、フック・サブコピーより広めの幅を確保する。
-  const headingWidth = skyWidth * 0.7;
-  const bodyFontSize = skyHeight * 0.029;
+  const isMobile = skyWidth <= NAV_INDICATOR_NARROW_BREAKPOINT_PX;
+  const bodyFontSize = panelFontPx(skyWidth, skyHeight, 0.029);
   // 本文は左揃え。末尾の孤立行を防ぐため折り返し幅を文字数ぶん広げ、
   // 右端のNavigationIndicatorと重ならないよう最大幅も抑える。
   const bodyMaxRight =
@@ -305,6 +431,27 @@ function WelcomePanelLayout({
       ? skyWidth / 2 - (NAV_INDICATOR_RIGHT_OFFSET_PX + NAV_INDICATOR_WIDTH_PX + NAV_INDICATOR_TEXT_GAP_PX)
       : skyWidth * 0.42;
   const bodyWidth = Math.min(skyWidth * 0.72 + bodyFontSize * 4, bodyMaxRight - leftX);
+  // デスクトップは見出しを広めに。スマホは本文と同じ幅に揃え、fitToWidth で拡大する。
+  const headingWidth = isMobile ? bodyWidth : skyWidth * 0.7;
+  const headingY = skyHeight * PANEL_HEADING_Y;
+  const [headingHeight, setHeadingHeight] = useState(0);
+  const stackGap = 12;
+  /** 見出しと「ぷるちか」の字間（かなり狭く） */
+  const headingSubcopyGap = 2;
+  const subcopyFontSize = panelFontPx(skyWidth, skyHeight, 0.024);
+  const subcopyBlock = subcopyFontSize * 1.5;
+  const desktopHeadingBlock = skyHeight * 0.068 * 1.22;
+  // 見出し直下に「ぷるちか」を密着。スマホは実測高さ、PCは見出し見積もり高さで詰める。
+  const subcopyY =
+    isMobile && headingHeight > 0
+      ? headingY - headingHeight - headingSubcopyGap
+      : headingY - desktopHeadingBlock - headingSubcopyGap;
+  const bodyY =
+    isMobile && headingHeight > 0
+      ? content.subcopy
+        ? subcopyY - subcopyBlock - stackGap
+        : headingY - headingHeight - stackGap
+      : skyHeight * (content.subcopy ? 0.56 : 0.58);
   return (
     <>
       <PanelHtmlText
@@ -312,7 +459,7 @@ function WelcomePanelLayout({
         x={leftX}
         startY={skyHeight * PANEL_HOOK_Y}
         maxWidth={leftWidth}
-        fontSize={skyHeight * 0.028}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.028)}
         lineHeight={1.45}
         color="#9f8aaa"
         letterSpacing="0.08em"
@@ -324,9 +471,9 @@ function WelcomePanelLayout({
       <PanelHtmlText
         text={content.heading}
         x={leftX}
-        startY={skyHeight * PANEL_HEADING_Y}
+        startY={headingY}
         maxWidth={headingWidth}
-        fontSize={skyHeight * 0.068}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.068)}
         lineHeight={1.22}
         color="#f4ecf7"
         letterSpacing="0.02em"
@@ -334,17 +481,23 @@ function WelcomePanelLayout({
         textAlign="left"
         opacity={opacity}
         role="heading"
+        fitToWidth={isMobile}
+        onSizeChange={(size) => {
+          if (isMobile) {
+            setHeadingHeight(size.height);
+          }
+        }}
       />
       {content.subcopy ? (
         <PanelHtmlText
           text={content.subcopy}
           x={leftX}
-          startY={skyHeight * 0.5}
+          startY={subcopyY}
           maxWidth={leftWidth}
-          fontSize={skyHeight * 0.024}
-          lineHeight={1.5}
-          color="#c39bd3"
-          letterSpacing="0.06em"
+          fontSize={subcopyFontSize}
+          lineHeight={1.2}
+          color="#ffffff"
+          letterSpacing="0.04em"
           anchorX="left"
           textAlign="left"
           opacity={opacity}
@@ -354,7 +507,7 @@ function WelcomePanelLayout({
       <LinkedBodyText
         segments={content.body}
         x={leftX}
-        startY={skyHeight * (content.subcopy ? 0.5 : 0.58)}
+        startY={bodyY}
         maxWidth={bodyWidth}
         fontSize={bodyFontSize}
         lineHeight={1.75}
@@ -382,15 +535,32 @@ function SplitGraphicPanelLayout({
 }: PanelLayoutProps & { content: SplitGraphicPanelContent }) {
   // 左マージンはようこそパネル（WelcomePanelLayout）と揃える。
   const leftX = -skyWidth * 0.42;
-  const leftWidth = skyWidth * 0.42;
+  const isMobile = skyWidth <= NAV_INDICATOR_NARROW_BREAKPOINT_PX;
+  const bodyFontSize = panelFontPx(skyWidth, skyHeight, 0.029);
+  // スマホは花びらを本文ブロック内に移すため、ようこそパネルと同じく横幅を広く取る。
+  const bodyMaxRight =
+    skyWidth >= NAV_INDICATOR_NARROW_BREAKPOINT_PX
+      ? skyWidth / 2 - (NAV_INDICATOR_RIGHT_OFFSET_PX + NAV_INDICATOR_WIDTH_PX + NAV_INDICATOR_TEXT_GAP_PX)
+      : skyWidth * 0.42;
+  const textWidth = isMobile
+    ? Math.min(skyWidth * 0.72 + bodyFontSize * 4, bodyMaxRight - leftX)
+    : skyWidth * 0.42;
+  const headingY = skyHeight * PANEL_HEADING_Y;
+  const [headingHeight, setHeadingHeight] = useState(0);
+  const bodyY =
+    isMobile && headingHeight > 0
+      ? headingY - headingHeight - 12
+      : skyHeight * 0.6;
+  const petalGraphicX = skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX;
+  const petalGraphicY = skyHeight * SCREEN_VERTICAL_CENTER_FRACTION;
   return (
     <>
       <PanelHtmlText
         text={content.hook}
         x={leftX}
         startY={skyHeight * PANEL_HOOK_Y}
-        maxWidth={leftWidth}
-        fontSize={skyHeight * 0.028}
+        maxWidth={textWidth}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.028)}
         lineHeight={1.45}
         color="#9f8aaa"
         letterSpacing="0.08em"
@@ -402,9 +572,9 @@ function SplitGraphicPanelLayout({
       <PanelHtmlText
         text={content.heading}
         x={leftX}
-        startY={skyHeight * PANEL_HEADING_Y}
-        maxWidth={leftWidth}
-        fontSize={skyHeight * 0.068}
+        startY={headingY}
+        maxWidth={textWidth}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.068)}
         lineHeight={1.22}
         color="#f4ecf7"
         letterSpacing="0.02em"
@@ -412,13 +582,19 @@ function SplitGraphicPanelLayout({
         textAlign="left"
         opacity={opacity}
         role="heading"
+        fitToWidth={isMobile}
+        onSizeChange={(size) => {
+          if (isMobile) {
+            setHeadingHeight(size.height);
+          }
+        }}
       />
       <LinkedBodyText
         segments={content.body}
         x={leftX}
-        startY={skyHeight * 0.6}
-        maxWidth={leftWidth}
-        fontSize={skyHeight * 0.029}
+        startY={bodyY}
+        maxWidth={textWidth}
+        fontSize={bodyFontSize}
         lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#c39bd3"
@@ -426,6 +602,11 @@ function SplitGraphicPanelLayout({
         textAlign="left"
         opacity={opacity}
         onNavigate={onNavigate}
+        afterBody={
+          isMobile ? (
+            <MobilePetalWheelLauncher opacity={opacity} stepIndex={stepIndex} />
+          ) : null
+        }
       />
       {/*
         花びらグラフィック：右半分。花びらをクリックするとその感情語を表示する（PlutchikPetalWheel参照）。
@@ -434,26 +615,25 @@ function SplitGraphicPanelLayout({
         通常のスクリーン投影モード（screen-space billboard）を使う。表示・非表示はテキストと同じ opacity で揃える。
         クリックを花びらまで届かせるため pointerEvents は 'auto'（ホイールイベントの伝播はヒットテストと無関係のため、
         スクロールジェスチャーには影響しない）。
+        スマホではインライン選択を切り離し、本文ブロック内のアイコンからオーバーレイ展開する。
       */}
-      <Html
-        center
-        position={[
-          skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX,
-          skyHeight * SCREEN_VERTICAL_CENTER_FRACTION,
-          0,
-        ]}
-        style={{ pointerEvents: 'auto' }}
-      >
-        <div style={{ opacity, transition: 'opacity 0.2s linear', pointerEvents: opacity > 0.5 ? 'auto' : 'none' }}>
-          {/*
-            PlutchikPetalWheel は既定で maxWidth:100% を付ける。Html のラッパーdivは
-            transformのみで明示的な width を持たないため、100%の基準が定まらず幅が0に
-            つぶれてしまう。ここでは固定pxで表示したいので maxWidth を打ち消す。
-          */}
-          {/* key={stepIndex}：パネルをスクロールして移動したら（進む・戻る方向とも）選択状態をリセットする */}
-          <PlutchikPetalWheel key={stepIndex} size={PETAL_WHEEL_HTML_SIZE} style={{ maxWidth: 'none' }} />
-        </div>
-      </Html>
+      {!isMobile && (
+        <Html
+          center
+          position={[petalGraphicX, petalGraphicY, 0]}
+          style={{ pointerEvents: 'auto' }}
+        >
+          <div style={{ opacity, transition: 'opacity 0.2s linear', pointerEvents: opacity > 0.5 ? 'auto' : 'none' }}>
+            {/*
+              PlutchikPetalWheel は既定で maxWidth:100% を付ける。Html のラッパーdivは
+              transformのみで明示的な width を持たないため、100%の基準が定まらず幅が0に
+              つぶれてしまう。ここでは固定pxで表示したいので maxWidth を打ち消す。
+            */}
+            {/* key={stepIndex}：パネルをスクロールして移動したら（進む・戻る方向とも）選択状態をリセットする */}
+            <PlutchikPetalWheel key={stepIndex} size={PETAL_WHEEL_HTML_SIZE} style={{ maxWidth: 'none' }} />
+          </div>
+        </Html>
+      )}
     </>
   );
 }
@@ -476,15 +656,23 @@ function SimplePanelLayout({
   // 左側より内側に寄せる（深掘りの見出しラベルは「段階的感情探索」等、ようこそ画面より長くなりうるため）。
   const rightSideX = skyWidth * 0.34;
   const headingX = mirrored ? rightSideX : leftSideX;
-  const headingWidth = skyWidth * 0.5;
   const headingAnchorX: 'left' | 'right' = mirrored ? 'right' : 'left';
+  const isMobile = skyWidth <= NAV_INDICATOR_NARROW_BREAKPOINT_PX;
 
-  const bodyFontSize = skyHeight * 0.029;
+  const bodyFontSize = panelFontPx(skyWidth, skyHeight, 0.029);
   // WelcomePanelLayoutと同様、末尾の孤立行を防ぐため文字数8つ分ほど幅を広げてある。
   const bodyWidth = skyWidth * 0.48 + bodyFontSize * 8;
+  // スマホは見出し幅を本文と同じにする。
+  const headingWidth = isMobile ? bodyWidth : skyWidth * 0.5;
   // 本文はフック・見出しと同じ基準位置・同じ揃え方向にする（左右どちらの配置でも1つのカラムとして揃える）。
   const bodyAnchorX: 'left' | 'right' = headingAnchorX;
   const bodyX = headingX;
+  const headingY = skyHeight * PANEL_HEADING_Y;
+  const [headingHeight, setHeadingHeight] = useState(0);
+  const bodyY =
+    isMobile && headingHeight > 0
+      ? headingY - headingHeight - 12
+      : skyHeight * 0.52;
 
   return (
     <>
@@ -493,7 +681,7 @@ function SimplePanelLayout({
         x={headingX}
         startY={skyHeight * PANEL_HOOK_Y}
         maxWidth={headingWidth}
-        fontSize={skyHeight * 0.028}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.028)}
         lineHeight={1.45}
         color="#9f8aaa"
         letterSpacing="0.08em"
@@ -505,9 +693,9 @@ function SimplePanelLayout({
       <PanelHtmlText
         text={content.heading}
         x={headingX}
-        startY={skyHeight * PANEL_HEADING_Y}
+        startY={headingY}
         maxWidth={headingWidth}
-        fontSize={skyHeight * 0.068}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.068)}
         lineHeight={1.22}
         color="#f4ecf7"
         letterSpacing="0.02em"
@@ -515,6 +703,12 @@ function SimplePanelLayout({
         textAlign={headingAnchorX}
         opacity={opacity}
         role="heading"
+        fitToWidth={isMobile}
+        onSizeChange={(size) => {
+          if (isMobile) {
+            setHeadingHeight(size.height);
+          }
+        }}
       />
       {/*
         本文は必須ルート（WelcomePanelLayout等）のLinkedBodyTextと全く同じコンポーネント・スタイルで描画する。
@@ -524,7 +718,7 @@ function SimplePanelLayout({
       <LinkedBodyText
         segments={[{ text: content.body }]}
         x={bodyX}
-        startY={skyHeight * 0.52}
+        startY={bodyY}
         maxWidth={bodyWidth}
         fontSize={bodyFontSize}
         lineHeight={1.75}
@@ -577,10 +771,20 @@ function DualWheelPanelLayout({
 
   // 狭い画面では本文が長く（プレースホルダーの仮テキストが特に長い）折り返し行数がかさむため、
   // 小さめ・幅広にして行数を抑える。花2輪はさらに下（地平線に立つ人物と重ならない最小限の位置）へ寄せる。
-  const bodyFontSize = isNarrow ? skyHeight * 0.021 : skyHeight * 0.029;
+  const bodyFontSize = panelFontPx(
+    skyWidth,
+    skyHeight,
+    isNarrow ? 0.021 : 0.029,
+  );
   // 花2輪＋組み合わせ感情名のグラフィック全体を、さらに左へ48px寄せる。
   const graphicsX = (isNarrow ? 0 : skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX) - 48;
   const graphicsY = isNarrow ? skyHeight * 0.14 : skyHeight * SCREEN_VERTICAL_CENTER_FRACTION;
+  const headingY = skyHeight * PANEL_HEADING_Y;
+  const [headingHeight, setHeadingHeight] = useState(0);
+  const bodyY =
+    isNarrow && headingHeight > 0
+      ? headingY - headingHeight - 12
+      : skyHeight * 0.6;
 
   return (
     <>
@@ -589,7 +793,7 @@ function DualWheelPanelLayout({
         x={textX}
         startY={skyHeight * PANEL_HOOK_Y}
         maxWidth={textWidth}
-        fontSize={skyHeight * 0.028}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.028)}
         lineHeight={1.45}
         color="#9f8aaa"
         letterSpacing="0.08em"
@@ -601,9 +805,9 @@ function DualWheelPanelLayout({
       <PanelHtmlText
         text={content.heading}
         x={textX}
-        startY={skyHeight * PANEL_HEADING_Y}
+        startY={headingY}
         maxWidth={textWidth}
-        fontSize={skyHeight * 0.068}
+        fontSize={panelFontPx(skyWidth, skyHeight, 0.068)}
         lineHeight={1.22}
         color="#f4ecf7"
         letterSpacing="0.02em"
@@ -611,11 +815,17 @@ function DualWheelPanelLayout({
         textAlign={textAnchorX}
         opacity={opacity}
         role="heading"
+        fitToWidth={isNarrow}
+        onSizeChange={(size) => {
+          if (isNarrow) {
+            setHeadingHeight(size.height);
+          }
+        }}
       />
       <LinkedBodyText
         segments={[{ text: content.body }]}
         x={textX}
-        startY={skyHeight * 0.6}
+        startY={bodyY}
         maxWidth={textWidth}
         fontSize={bodyFontSize}
         lineHeight={1.75}
@@ -685,6 +895,7 @@ function TextPanel({
   content,
   skyWidth,
   skyHeight,
+  textLiftY,
   rotatingGroupRef,
   onNavigate,
   stepIndex,
@@ -724,7 +935,7 @@ function TextPanel({
   // 逆に上方向（dy>0）は skyHeight（＝画面上端）を超えないよう、各要素をそこへ収める。
   return (
     <group position={position} rotation={[-angle, 0, 0]}>
-      <group position={[0, 0, 1]}>
+      <group position={[0, textLiftY, 1]}>
         {content.layout === 'welcome' && (
           <WelcomePanelLayout
             content={content}
@@ -779,7 +990,7 @@ interface PlanetMeshProps {
    * 「回転が実際に見える」体験を保つため、home-introのデフォルト挙動はこちら）。
    */
   snapToInitialStep?: boolean;
-  /** 球の現在の回転角（ラジアン）を毎フレーム通知する。奥の星空レイヤーなど、この回転と同じ「進み具合」を共有したい2D要素向け。 */
+  /** 球の現在の回転角（ラジアン）を毎フレーム通知する。 */
   onRotationChange?: (rotationX: number) => void;
   /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
   onNavigate?: (path: string) => void;
@@ -807,11 +1018,13 @@ function PlanetMesh({
   const texture = useMemo(() => createPlanetTexture(), []);
 
   const radius = Math.min(size.width * 0.62, 900);
-  const apexY = size.height / 2 - HOME_INTRO_HORIZON_RATIO * size.height;
+  // 惑星・足元はスマホで少し下げる。文字パネルはデスクトップと同じ空の高さ基準＋リフトで位置を維持する。
+  const visualHorizon = homeIntroHorizonRatio(size.width);
+  const apexY = size.height / 2 - visualHorizon * size.height;
   const centerY = apexY - radius;
-  // 「空」＝頂点（地面との境界）から画面上端までの範囲。テキストはここに収める。
   const skyWidth = size.width;
   const skyHeight = HOME_INTRO_HORIZON_RATIO * size.height;
+  const textLiftY = (visualHorizon - HOME_INTRO_HORIZON_RATIO) * size.height;
 
   // マウント直後の初期姿勢。既定は「歪みのない赤道位置」に即座にスナップし、そこから現在ステップ
   // ぶんだけアニメーションさせる（rotation.x=0=極からアニメすると歪みが一瞬見えるが、赤道からなら
@@ -854,6 +1067,7 @@ function PlanetMesh({
             content={content}
             skyWidth={skyWidth}
             skyHeight={skyHeight}
+            textLiftY={textLiftY}
             rotatingGroupRef={rotatingRef}
             onNavigate={onNavigate}
             stepIndex={stepIndex}
@@ -868,7 +1082,7 @@ interface PlanetGlobeProps {
   stepIndex: number;
   panelContents: (PlanetPanelContent | null)[];
   snapToInitialStep?: boolean;
-  /** 球の現在の回転角（ラジアン）を毎フレーム通知する。奥の星空レイヤーなど、この回転と同じ「進み具合」を共有したい2D要素向け。 */
+  /** 球の現在の回転角（ラジアン）を毎フレーム通知する。 */
   onRotationChange?: (rotationX: number) => void;
   /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
   onNavigate?: (path: string) => void;

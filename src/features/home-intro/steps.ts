@@ -24,10 +24,11 @@ export const HOME_INTRO_STEPS: HomeIntroStepDefinition[] = [
     content: {
       layout: 'welcome',
       hook: '心のもやもやにピッタリなことばを、みつける場所です。',
-      heading: 'PLUTCHIKA(ぷるちか)へようこそ',
+      heading: 'PLUTCHIKAへようこそ',
+      subcopy: 'ぷるちか',
       body: [
         {
-          text: '私たちは毎日、たくさんの感情の中で生きています。\n「なんだか心が落ち着かない」「うれしいけれど、どこか寂しい」……。\nそんな風に、自分の気持ちをうまく言葉にできず、モヤモヤした経験はありませんか?',
+          text: '私たちは毎日、たくさんの感情の中で生きています。\n「なんだか心が落ち着かない」「うれしいけれど、どこか寂しい」……。\nそんな風に、自分の気持ちをうまく言葉にできず、モヤモヤした経験はありませんか? \n',
         },
         { text: '心理学', linkTo: `${ROUTES.deepDive}?panel=1&from=welcome` },
         {
@@ -44,14 +45,14 @@ export const HOME_INTRO_STEPS: HomeIntroStepDefinition[] = [
       hook: '感情の語彙をマッピングしました。',
       heading: 'プルチックの感情環とは',
       body: [
-        { text: '心理学者プルチックが考案した「' },
+        { text: '心理学者プルチックが考案した' },
         { text: 'プルチック環', linkTo: `${ROUTES.deepDive}?panel=3&from=emotion-wheel` },
         {
-          text: '」は、8つの基本感情に色と位置を与え、感情をひとつの地図として表したものです。PLUTCHIKAは、このプルチック環をもとに、感情を表す言葉をひとつひとつ段階に分けて位置づけ、マッピングしました。大きな感情から、少しずつニュアンスの違う言葉へ——地図の上を「',
+          text: 'は、8つの基本感情に色と位置を与え、感情をひとつの地図として表したものです。PLUTCHIKAは、このプルチック環をもとに、感情を表す言葉をひとつひとつ段階に分けて位置づけ、マッピングしました。大きな感情から、少しずつニュアンスの違う言葉へ——地図の上を',
         },
         { text: '探索', linkTo: `${ROUTES.deepDive}?panel=4&from=emotion-wheel` },
         {
-          text: '」するように辿っていくと、今のあなたにぴったりな一語が見つかるはずです。さあ、その言葉を探しに行きましょう。',
+          text: 'するように辿っていくと、今のあなたにぴったりな一語が見つかるはずです。さあ、その言葉を探しに行きましょう。',
         },
       ],
       graphic: 'plutchik-wheel',

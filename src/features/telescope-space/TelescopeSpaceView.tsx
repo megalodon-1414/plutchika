@@ -55,7 +55,6 @@ import {
 } from '../../data/basicEmotionDescriptions';
 import { setTelescopeAimMode, setTelescopePinHidden } from './telescopeAim';
 import { TelescopeEmotionInfoPanel, useTelescopeEmotionInfoMobile } from './TelescopeEmotionInfoPanel';
-import { TelescopeCornerMenu } from './TelescopeCornerMenu';
 import { TelescopeSpaceCanvas } from './TelescopeSpaceCanvas';
 import { TelescopeZoomLadder, zoomLevelIndex } from './TelescopeZoomLadder';
 import {
@@ -1461,8 +1460,6 @@ export function TelescopeSpaceView() {
           </div>
         </div>
       )}
-
-      <TelescopeCornerMenu />
 
     </div>
   );
