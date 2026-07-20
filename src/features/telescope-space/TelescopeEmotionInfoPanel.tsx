@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { LoopingTickerText } from '../../components/LoopingTickerText';
 import { getExplorationInfoUiLayout } from '../../utils/explorationInfoUiLayout';
 import { getEmotionUiTheme } from '../../utils/emotionUiTheme';
+import { TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH } from './constants';
 
-/** 感情説明UIをスマホ向け下ドック＋横書きに切り替える幅 */
-export const TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH = 640;
+export { TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH };
 
 export interface TelescopeEmotionInfoPanelProps {
   panelKey: string;

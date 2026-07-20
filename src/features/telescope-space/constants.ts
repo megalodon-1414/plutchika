@@ -48,6 +48,9 @@ export const TELESCOPE_ORBIT_SENSITIVITY = 0.00055;
 export const TELESCOPE_MOBILE_DRAG_SENSITIVITY_MUL = 1.55;
 /** スマホ判定の画面幅上限（感情説明UIと同じ） */
 export const TELESCOPE_MOBILE_MAX_WIDTH_PX = 640;
+/** 感情説明UIをスマホ向け下ドック＋横書きに切り替える幅 */
+export const TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH =
+  TELESCOPE_MOBILE_MAX_WIDTH_PX;
 /** 正面からの仰角中心 */
 export const TELESCOPE_ORBIT_PHI_CENTER = Math.PI / 2 - 0.03;
 /**

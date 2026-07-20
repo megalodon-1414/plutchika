@@ -24,6 +24,11 @@ interface TelescopeEyepieceProps {
    * レイヤー4で右側の単語説明UIを見やすくするために使う。
    */
   shiftX?: string;
+  /**
+   * レンズ全体の垂直オフセット。CSS長（例 '-10vh'）。
+   * スマホのレイヤー4で下の説明UIを見やすくするために使う。
+   */
+  shiftY?: string;
   /** 選択した感情色でレンズ外周を発光させる */
   rimGlowColor?: string | null;
 }
@@ -48,6 +53,7 @@ export function TelescopeEyepiece({
   aperture,
   overscan = 1,
   shiftX = '0px',
+  shiftY = '0px',
   rimGlowColor = null,
 }: TelescopeEyepieceProps) {
   const diameter = telescopeEyepieceDiameter(aperture, overscan);
@@ -66,8 +72,8 @@ export function TelescopeEyepiece({
     left: '50%',
     top: '50%',
     // 画面より大きい円でも上下左右へ均等にはみ出すよう明示的に中央固定する。
-    // shiftX で視野ごと水平にずらせる（レイヤー4の説明UI退避用）。
-    transform: `translate(calc(-50% + ${shiftX}), -50%)`,
+    // shiftX / shiftY で視野ごとずらせる（レイヤー4の説明UI退避用）。
+    transform: `translate(calc(-50% + ${shiftX}), calc(-50% + ${shiftY}))`,
     borderRadius: '50%',
     pointerEvents: 'auto',
     transition:

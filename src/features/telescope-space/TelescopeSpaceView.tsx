@@ -9,7 +9,7 @@ import {
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import { getBasicEmotion, getEmotionById, isBasicEmotionId } from '../../data/emotions';
-import { ExplorationWordInfoPanel } from '../../components/ExplorationWordInfoPanel';
+import { ExplorationWordInfoPanel, explorationUiSlideAnimation, EXPLORATION_UI_TRANSITION_KEYFRAMES } from '../../components/ExplorationWordInfoPanel';
 import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
 import type { UserPlotRow } from '../../types/userPlot';
 import { complementaryHex, analogousEmotionColors } from '../../utils/emotionColor';
@@ -44,6 +44,7 @@ import { getTelescopeRegionDefinition } from './layer3Region';
 import {
   createTelescopeExplorationHudState,
   isTelescopeExplorationSelectablePlot,
+  TELESCOPE_EXPLORATION_VIEW,
   type TelescopeExplorationHudState,
 } from './layer4Exploration';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
@@ -127,13 +128,40 @@ function apertureForPhase(phase: TelescopeZoomPhase): number {
 
 /**
  * レンズ視野の水平オフセット。
- * レイヤー4では右側の単語説明UIを見やすくするため視野ごと左へずらす。
+ * デスクトップのレイヤー4では右側の単語説明UIを見やすくするため視野ごと左へずらす。
+ * スマホでは上方向シフトを使うため水平は動かさない。
  */
-function eyepieceShiftXForPhase(phase: TelescopeZoomPhase): string {
+function eyepieceShiftXForPhase(
+  phase: TelescopeZoomPhase,
+  mobile: boolean,
+): string {
+  if (mobile) {
+    return '0px';
+  }
   switch (phase) {
     case 'entering-exploration':
     case 'exploration':
       return '-13vw';
+    default:
+      return '0px';
+  }
+}
+
+/**
+ * レンズ視野の垂直オフセット。
+ * スマホのレイヤー4では下の単語説明UIを見やすくするため視野ごと上へずらす。
+ */
+function eyepieceShiftYForPhase(
+  phase: TelescopeZoomPhase,
+  mobile: boolean,
+): string {
+  if (!mobile) {
+    return '0px';
+  }
+  switch (phase) {
+    case 'entering-exploration':
+    case 'exploration':
+      return '-11vh';
     default:
       return '0px';
   }
@@ -170,8 +198,9 @@ const EXPLORATION_ARROW_BASE_ANGLES = [
 ] as const;
 /** 楕円半径（レンズ幅・高さに対する%） */
 const EXPLORATION_ARROW_RX = 32;
-/** 検知楕円と同じ扁平率（0.57）をかけた縦半径 */
-const EXPLORATION_ARROW_RY = EXPLORATION_ARROW_RX * 0.57;
+/** 見回し操作と同じ扁平率をかけた縦半径 */
+const EXPLORATION_ARROW_RY =
+  EXPLORATION_ARROW_RX * TELESCOPE_EXPLORATION_VIEW.orbitEcc;
 const EXPLORATION_ARROW_SIZE = 78;
 /** 矢印中心から引き出し線の始点までの距離（px） */
 const EXPLORATION_ARROW_LABEL_GAP = 34;
@@ -224,8 +253,16 @@ function ExplorationGuideLine({
       const panelRect = panel.getBoundingClientRect();
       const x1 = state.plotClientX - rect.left;
       const y1 = state.plotClientY - rect.top;
-      const x2 = panelRect.left - rect.left - 6;
-      const y2 = panelRect.top + panelRect.height * 0.5 - rect.top;
+      // 下ドック（横書き）パネルなら上辺中央、右サイドなら左辺中央へ結ぶ
+      const dockBottom =
+        panelRect.bottom > window.innerHeight * 0.72 &&
+        panelRect.width > window.innerWidth * 0.45;
+      const x2 = dockBottom
+        ? panelRect.left + panelRect.width * 0.5 - rect.left
+        : panelRect.left - rect.left - 6;
+      const y2 = dockBottom
+        ? panelRect.top - rect.top - 4
+        : panelRect.top + panelRect.height * 0.5 - rect.top;
       line.setAttribute('x1', `${x1}`);
       line.setAttribute('y1', `${y1}`);
       line.setAttribute('x2', `${x2}`);
@@ -296,6 +333,10 @@ export function TelescopeSpaceView() {
   const [focusBasicId, setFocusBasicId] = useState<BasicEmotionId | null>(null);
   const [selectedDyadId, setSelectedDyadId] = useState<EmotionId | null>(null);
   const [explorationPlotId, setExplorationPlotId] = useState<string | null>(
+    null,
+  );
+  /** 矢印移動時の UI 入場方向。点クリック時は null */
+  const [segmentUiDirection, setSegmentUiDirection] = useState<-1 | 1 | null>(
     null,
   );
   const [explorationSegmentIndex, setExplorationSegmentIndex] = useState<
@@ -397,10 +438,24 @@ export function TelescopeSpaceView() {
     () => eyepieceOverscanForPhase(zoomPhase),
     [zoomPhase],
   );
+  const emotionInfoMobile = useTelescopeEmotionInfoMobile();
   const eyepieceShiftX = useMemo(
-    () => eyepieceShiftXForPhase(zoomPhase),
-    [zoomPhase],
+    () => eyepieceShiftXForPhase(zoomPhase, emotionInfoMobile),
+    [zoomPhase, emotionInfoMobile],
   );
+  const eyepieceShiftY = useMemo(
+    () => eyepieceShiftYForPhase(zoomPhase, emotionInfoMobile),
+    [zoomPhase, emotionInfoMobile],
+  );
+  const explorationArrowSize = emotionInfoMobile
+    ? Math.round(EXPLORATION_ARROW_SIZE * 0.62)
+    : EXPLORATION_ARROW_SIZE;
+  const explorationArrowLabelLine = emotionInfoMobile
+    ? Math.round(EXPLORATION_ARROW_LABEL_LINE * 0.7)
+    : EXPLORATION_ARROW_LABEL_LINE;
+  const explorationArrowLabelGap = emotionInfoMobile
+    ? Math.round(EXPLORATION_ARROW_LABEL_GAP * 0.7)
+    : EXPLORATION_ARROW_LABEL_GAP;
   const showHud = true;
   const showRimGlow = settled !== 'far';
 
@@ -457,6 +512,7 @@ export function TelescopeSpaceView() {
         if (!startId) {
           return prev;
         }
+        setSegmentUiDirection(null);
         setExplorationPlotId(startId);
         setExplorationSegmentIndex(focus.segmentIndex);
         setLayer2HudActive(false);
@@ -517,6 +573,7 @@ export function TelescopeSpaceView() {
 
   const handleSelectExplorationPlot = useCallback(
     (id: string) => {
+      setSegmentUiDirection(null);
       setExplorationPlotId(id);
       const plot = wordPlots.find((row) => row.word_id === id);
       if (!plot || !selectedDyadId) {
@@ -590,8 +647,6 @@ export function TelescopeSpaceView() {
       tickerLabel: 'DETECTING',
     };
   }, [layer2HudMode, viewFocus.nearest]);
-  const emotionInfoMobile = useTelescopeEmotionInfoMobile();
-
   // スマホは画面中央検知、デスクトップはカーソル検知
   useEffect(() => {
     setTelescopeAimMode(emotionInfoMobile ? 'center' : 'cursor');
@@ -704,12 +759,14 @@ export function TelescopeSpaceView() {
           const text = labelEl.children[1] as HTMLElement | undefined;
           if (line && text) {
             if (extendUp) {
-              line.style.top = `${-(EXPLORATION_ARROW_LABEL_GAP + EXPLORATION_ARROW_LABEL_LINE)}px`;
-              text.style.top = `${-(EXPLORATION_ARROW_LABEL_GAP + EXPLORATION_ARROW_LABEL_LINE + 6)}px`;
+              line.style.top = `${-(explorationArrowLabelGap + explorationArrowLabelLine)}px`;
+              line.style.height = `${explorationArrowLabelLine}px`;
+              text.style.top = `${-(explorationArrowLabelGap + explorationArrowLabelLine + 6)}px`;
               text.style.transform = 'translate(-50%, -100%)';
             } else {
-              line.style.top = `${EXPLORATION_ARROW_LABEL_GAP}px`;
-              text.style.top = `${EXPLORATION_ARROW_LABEL_GAP + EXPLORATION_ARROW_LABEL_LINE + 6}px`;
+              line.style.top = `${explorationArrowLabelGap}px`;
+              line.style.height = `${explorationArrowLabelLine}px`;
+              text.style.top = `${explorationArrowLabelGap + explorationArrowLabelLine + 6}px`;
               text.style.transform = 'translate(-50%, 0)';
             }
           }
@@ -719,7 +776,11 @@ export function TelescopeSpaceView() {
     };
     frame = requestAnimationFrame(sync);
     return () => cancelAnimationFrame(frame);
-  }, [explorationHudMode]);
+  }, [
+    explorationHudMode,
+    explorationArrowLabelGap,
+    explorationArrowLabelLine,
+  ]);
   const selectedEmotion = useMemo(() => {
     if (!focusBasicId) {
       return null;
@@ -824,6 +885,7 @@ export function TelescopeSpaceView() {
       if (!nextPlotId) {
         return;
       }
+      setSegmentUiDirection(direction);
       setExplorationSegmentIndex(nextIndex);
       setExplorationPlotId(nextPlotId);
     },
@@ -873,6 +935,7 @@ export function TelescopeSpaceView() {
         aperture={aperture}
         overscan={eyepieceOverscan}
         shiftX={eyepieceShiftX}
+        shiftY={eyepieceShiftY}
         rimGlowColor={selectedEmotion?.color}
         innerOverlay={
           <>
@@ -1013,9 +1076,10 @@ export function TelescopeSpaceView() {
             top: '50%',
             width: telescopeEyepieceDiameter(aperture, eyepieceOverscan),
             height: telescopeEyepieceDiameter(aperture, eyepieceOverscan),
-            transform: `translate(calc(-50% + ${eyepieceShiftX}), -50%)`,
+            transform: `translate(calc(-50% + ${eyepieceShiftX}), calc(-50% + ${eyepieceShiftY}))`,
             pointerEvents: 'none',
             zIndex: 10,
+            transition: 'transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
           }}
         >
           <style>{`
@@ -1074,8 +1138,8 @@ export function TelescopeSpaceView() {
               style={{
                 position: 'absolute',
                 ...explorationArrowBasePosition(arrowIndex),
-                width: EXPLORATION_ARROW_SIZE,
-                height: EXPLORATION_ARROW_SIZE,
+                width: explorationArrowSize,
+                height: explorationArrowSize,
                 padding: 0,
                 border: 0,
                 background: 'transparent',
@@ -1164,7 +1228,7 @@ export function TelescopeSpaceView() {
                       position: 'absolute',
                       left: -0.75,
                       width: 1.5,
-                      height: EXPLORATION_ARROW_LABEL_LINE,
+                      height: explorationArrowLabelLine,
                       background: explorationArrowColor,
                       boxShadow: `0 0 5px ${explorationArrowColor}88`,
                     }}
@@ -1174,7 +1238,7 @@ export function TelescopeSpaceView() {
                       position: 'absolute',
                       left: 0,
                       whiteSpace: 'nowrap',
-                      fontSize: 15,
+                      fontSize: emotionInfoMobile ? 12 : 15,
                       fontWeight: 600,
                       letterSpacing: '0.14em',
                       color: explorationArrowColor,
@@ -1198,51 +1262,136 @@ export function TelescopeSpaceView() {
             panelRef={explorationPanelRef}
             color={selectedExploration?.color ?? '#f4ecf7'}
           />
-          <ExplorationWordInfoPanel
-            key={selectedExplorationPlot.word_id}
-            plot={selectedExplorationPlot}
-            rightOffset={140}
-            panelRef={explorationPanelRef}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              left: '50%',
-              bottom: 56,
-              transform: `translateX(calc(-50% + ${eyepieceShiftX}))`,
-              transition: 'transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
-              zIndex: 3,
-              pointerEvents: 'auto',
-            }}
-          >
-            <style>{`
-              @keyframes telescopeLandButtonGradient {
-                from { background-position: 0% 50%; }
-                to { background-position: 100% 50%; }
-              }
-            `}</style>
-            <Link
-              to={getEmotionWordPath(selectedExplorationPlot)}
+          <style>{`
+            @keyframes telescopeLandButtonGradient {
+              from { background-position: 0% 50%; }
+              to { background-position: 100% 50%; }
+            }
+            ${EXPLORATION_UI_TRANSITION_KEYFRAMES}
+          `}</style>
+          {emotionInfoMobile ? (
+            <div
               style={{
-                display: 'inline-block',
-                padding: '12px 26px',
-                border: 'none',
-                borderRadius: 8,
-                color: '#f4ecf7',
-                textDecoration: 'none',
-                fontSize: '0.88rem',
-                letterSpacing: '0.16em',
-                fontWeight: 700,
-                backgroundImage: landButtonGradient.image,
-                backgroundSize: '300% 100%',
-                animation: 'telescopeLandButtonGradient 4.8s linear infinite',
-                boxShadow: `0 10px 28px rgba(0, 0, 0, 0.35), 0 0 22px ${landButtonGradient.glow}55`,
-                textShadow: '0 1px 8px rgba(0, 0, 0, 0.55)',
+                position: 'absolute',
+                left: 10,
+                right: 10,
+                bottom: 14,
+                zIndex: 3,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 10,
+                pointerEvents: 'none',
               }}
             >
-              この感情に降り立つ
-            </Link>
-          </div>
+              <div
+                key={`land-${selectedExplorationPlot.word_id}-${segmentUiDirection ?? 'n'}`}
+                style={{
+                  pointerEvents: 'auto',
+                  animation: explorationUiSlideAnimation(segmentUiDirection),
+                }}
+              >
+                <Link
+                  to={getEmotionWordPath(selectedExplorationPlot)}
+                  style={{
+                    display: 'inline-block',
+                    padding: '10px 22px',
+                    border: 'none',
+                    borderRadius: 999,
+                    color: '#f4ecf7',
+                    textDecoration: 'none',
+                    fontSize: '0.78rem',
+                    letterSpacing: '0.16em',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    backgroundImage: landButtonGradient.image,
+                    backgroundSize: '300% 100%',
+                    animation:
+                      'telescopeLandButtonGradient 4.8s linear infinite',
+                    boxShadow: `0 10px 28px rgba(0, 0, 0, 0.35), 0 0 22px ${landButtonGradient.glow}55`,
+                    textShadow: '0 1px 8px rgba(0, 0, 0, 0.55)',
+                  }}
+                >
+                  この感情に降り立つ
+                </Link>
+              </div>
+              <ExplorationWordInfoPanel
+                key={`${selectedExplorationPlot.word_id}-${segmentUiDirection ?? 'n'}`}
+                plot={selectedExplorationPlot}
+                rightOffset={140}
+                panelRef={explorationPanelRef}
+                writingDirection="horizontal"
+                embedded
+                enterDirection={segmentUiDirection}
+              />
+            </div>
+          ) : (
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                zIndex: 3,
+                display: 'flex',
+                justifyContent: 'flex-end',
+                alignItems: 'flex-end',
+                paddingRight: 'max(140px, 9vw)',
+                pointerEvents: 'none',
+                boxSizing: 'border-box',
+              }}
+            >
+              <div
+                key={`land-${selectedExplorationPlot.word_id}-${segmentUiDirection ?? 'n'}`}
+                style={{
+                  position: 'absolute',
+                  left: `calc(50% + ${eyepieceShiftX})`,
+                  bottom: 0,
+                  transition:
+                    'left 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  pointerEvents: 'auto',
+                  animation: explorationUiSlideAnimation(
+                    segmentUiDirection,
+                    true,
+                  ),
+                }}
+              >
+                <Link
+                  to={getEmotionWordPath(selectedExplorationPlot)}
+                  style={{
+                    display: 'inline-block',
+                    padding: '12px 26px',
+                    border: 'none',
+                    borderRadius: 999,
+                    color: '#f4ecf7',
+                    textDecoration: 'none',
+                    fontSize: '0.88rem',
+                    letterSpacing: '0.16em',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                    backgroundImage: landButtonGradient.image,
+                    backgroundSize: '300% 100%',
+                    animation:
+                      'telescopeLandButtonGradient 4.8s linear infinite',
+                    boxShadow: `0 10px 28px rgba(0, 0, 0, 0.35), 0 0 22px ${landButtonGradient.glow}55`,
+                    textShadow: '0 1px 8px rgba(0, 0, 0, 0.55)',
+                  }}
+                >
+                  この感情に降り立つ
+                </Link>
+              </div>
+              <ExplorationWordInfoPanel
+                key={`${selectedExplorationPlot.word_id}-${segmentUiDirection ?? 'n'}`}
+                plot={selectedExplorationPlot}
+                rightOffset={140}
+                panelRef={explorationPanelRef}
+                writingDirection="vertical"
+                embedded
+                enterDirection={segmentUiDirection}
+              />
+            </div>
+          )}
         </>
       ) : null}
 
