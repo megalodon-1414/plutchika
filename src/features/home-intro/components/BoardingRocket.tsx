@@ -14,7 +14,7 @@ import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import { Suspense, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { HOME_INTRO_HORIZON_RATIO } from '../sceneLayout';
+import { homeIntroHorizonRatio } from '../sceneLayout';
 
 export type RocketPhase = 'enter' | 'board' | 'launch';
 
@@ -110,7 +110,7 @@ function RocketModel({ phase }: RocketModelProps) {
   }, [obj, size.height]);
 
   // 惑星の頂点（人物の足元＝地平線）のワールドY。ここがロケットの接地面になる。
-  const horizonY = size.height / 2 - HOME_INTRO_HORIZON_RATIO * size.height;
+  const horizonY = size.height / 2 - homeIntroHorizonRatio(size.width) * size.height;
 
   useFrame((state) => {
     const group = groupRef.current;

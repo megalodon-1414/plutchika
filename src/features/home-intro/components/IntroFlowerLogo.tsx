@@ -3,7 +3,10 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BASIC_EMOTIONS } from '../../../data/emotions';
 import { createPlutchikPetalShape } from '../../../utils/plutchikPetalShape3d';
-import { HOME_INTRO_HORIZON_RATIO } from '../sceneLayout';
+import {
+  HOME_INTRO_MOBILE_MAX_WIDTH_PX,
+  homeIntroHorizonRatio,
+} from '../sceneLayout';
 
 /**
  * 旧 home-tutorial の3D花ロゴ（HomeTutorialPlutchikWheel3D、intro-redesign前に削除済み）を
@@ -13,7 +16,6 @@ import { HOME_INTRO_HORIZON_RATIO } from '../sceneLayout';
  * カメラ設定＝世界単位がCSSピクセルになる構成）に描画する。中心球の位置・半径だけを
  * PlanetGlobe.tsx側の計算式（apexY/radius）に合わせて補間することで、スクロールで
  * 次シーンの惑星（地平線の球）へ同じ球が繋がって見える演出にする。
- * PlanetGlobe.tsx / sceneLayout.ts は一切改修しない（HOME_INTRO_HORIZON_RATIOを読むだけ）。
  */
 
 const PETAL_OUTER_RADIUS = 140;
@@ -31,6 +33,9 @@ const HUB_REST_RADIUS = 34;
 
 /** 静止時、花全体を画面中央からどれだけ左へ寄せるか（画面幅に対する比率）。右側にワードマークを置くレイアウト用。 */
 const HUB_REST_OFFSET_X_RATIO = 0.23;
+
+/** スマホ時の花ロゴ縮小率（60%）。 */
+const MOBILE_FLOWER_SCALE = 0.6;
 
 /** ロゴ離脱時（花びら散開・中心球の受け渡し）の収束速度。 */
 const PROGRESS_SCATTER_SPEED = 3.2;
@@ -126,26 +131,34 @@ function FlowerScene({ atLogoStep }: { atLogoStep: boolean }) {
 
     // PlanetGlobe.tsx（PlanetMesh）と全く同じ式。同ファイルは改修せず、ここで読み取り専用に複製する。
     const planetRadius = Math.min(size.width * 0.62, 900);
-    const apexY = size.height / 2 - HOME_INTRO_HORIZON_RATIO * size.height;
+    const apexY = size.height / 2 - homeIntroHorizonRatio(size.width) * size.height;
     const planetCenterY = apexY - planetRadius;
-    // 花びらは常に「花の錨点」(restX, 0)へ収束するので、中心球も静止時はそこに揃える
-    // （花の中心＝旧参考実装と同じ見た目）。PlanetGlobeの球は常に画面中央(x=0)なので、
-    // 散開時の中心球はX方向にも受け渡し先へ補間する。
-    const restX = -size.width * HUB_REST_OFFSET_X_RATIO;
-    const restY = 0;
+
+    const isMobile = size.width <= HOME_INTRO_MOBILE_MAX_WIDTH_PX;
+    const restScale = isMobile ? MOBILE_FLOWER_SCALE : 1;
+    // デスクトップ: 左寄せ＋画面上下中央。スマホ: 中央・タイトル下（タイトルは少し上へ退避）。
+    const restX = isMobile ? 0 : -size.width * HUB_REST_OFFSET_X_RATIO;
+    const titleHalfApprox = Math.min(size.width * 0.09, 52);
+    const flowerExtent = PETAL_OUTER_RADIUS * restScale;
+    // タイトル下に置きつつ、少し上寄せ（隙間を詰める）
+    const restY = isMobile
+      ? -(titleHalfApprox + 8 + flowerExtent * 0.42)
+      : 0;
+    const restHubRadius = HUB_REST_RADIUS * restScale;
 
     // ロゴ復帰（gather）時は惑星から戻るモーションにせず、花の中心に固定したまま
     // 花びらの集合と同期して不透明度だけ上げる（だんだんと濃く現れさせる）。
     // ロゴ離脱（scatter）時だけ、位置・半径をPlanetGlobeへ補間して受け渡し演出にする。
     const isGathering = progressTarget.current === 0;
     const hubRadius = isGathering
-      ? HUB_REST_RADIUS
-      : THREE.MathUtils.lerp(HUB_REST_RADIUS, planetRadius, eased);
+      ? restHubRadius
+      : THREE.MathUtils.lerp(restHubRadius, planetRadius, eased);
     const hubX = isGathering ? restX : THREE.MathUtils.lerp(restX, 0, eased);
     const hubY = isGathering ? restY : THREE.MathUtils.lerp(restY, planetCenterY, eased);
 
     if (flowerAnchorRef.current) {
       flowerAnchorRef.current.position.set(restX, restY, 0);
+      flowerAnchorRef.current.scale.setScalar(restScale);
     }
     if (hubRef.current) {
       hubRef.current.scale.setScalar(hubRadius);

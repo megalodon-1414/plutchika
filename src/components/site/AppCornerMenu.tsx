@@ -5,10 +5,10 @@ import { ROUTES } from '../../routes/paths';
 const LINE_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 
 /**
- * 望遠鏡画面右上のメニュー（三本線）。
- * 線はそれぞれ変形し、プルダウンは背景なしの薄い文字メニュー。
+ * 右上ハンバーガーメニュー（Home など）。
+ * 望遠鏡・感情MAP・ホームなどフルスクリーン画面で共通利用する。
  */
-export function TelescopeCornerMenu() {
+export function AppCornerMenu() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -45,12 +45,12 @@ export function TelescopeCornerMenu() {
         position: 'absolute',
         top: 'max(12px, env(safe-area-inset-top, 0px))',
         right: 14,
-        zIndex: 6,
+        zIndex: 80,
         pointerEvents: 'auto',
       }}
     >
       <style>{`
-        @keyframes telescopeMenuItemIn {
+        @keyframes appCornerMenuItemIn {
           from {
             opacity: 0;
             transform: translateY(-6px);
@@ -92,7 +92,6 @@ export function TelescopeCornerMenu() {
             transform: 'translate(-50%, -50%)',
           }}
         >
-          {/* 上線 */}
           <span
             style={{
               position: 'absolute',
@@ -110,7 +109,6 @@ export function TelescopeCornerMenu() {
               transition: `transform 420ms ${LINE_EASING}`,
             }}
           />
-          {/* 中線 */}
           <span
             style={{
               position: 'absolute',
@@ -128,7 +126,6 @@ export function TelescopeCornerMenu() {
               transition: `transform 280ms ${LINE_EASING}, opacity 220ms ease`,
             }}
           />
-          {/* 下線 */}
           <span
             style={{
               position: 'absolute',
@@ -184,7 +181,7 @@ export function TelescopeCornerMenu() {
             textShadow: '0 1px 8px rgba(0,0,0,0.7)',
             background: 'transparent',
             animation: open
-              ? `telescopeMenuItemIn 360ms ${LINE_EASING} both`
+              ? `appCornerMenuItemIn 360ms ${LINE_EASING} both`
               : 'none',
           }}
         >
