@@ -1,7 +1,7 @@
-import { Html, Text } from '@react-three/drei';
+import { Html } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { RefObject } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import * as THREE from 'three';
 import { PlutchikPetalWheel } from '../../../components/landing/PlutchikPetalWheel';
 import type { BasicEmotionId } from '../../../data/emotions';
@@ -34,6 +34,79 @@ const ROTATION_LERP_SPEED = 4;
 const PLANET_BASE_COLOR = '#c3cbef';
 const CRATER_COLOR = 'rgba(64, 68, 116, 0.4)';
 const CRATER_COUNT = 46;
+
+type PanelTextRole = 'hook' | 'heading' | 'subcopy' | 'body';
+
+const PANEL_TEXT_ROLE_CLASS: Record<PanelTextRole, string> = {
+  hook: 'home-intro-panel-text home-intro-panel-text--hook font-momochidori font-momochidori--medium',
+  heading: 'home-intro-panel-text home-intro-panel-text--heading font-momochidori font-momochidori--bold',
+  subcopy: 'home-intro-panel-text home-intro-panel-text--subcopy font-momochidori font-momochidori--semibold',
+  body: 'home-intro-panel-text home-intro-panel-text--body font-momochidori font-momochidori--medium',
+};
+
+function anchorTransformFor(anchorX: 'left' | 'right' | 'center'): string {
+  if (anchorX === 'right') {
+    return 'translateX(-100%)';
+  }
+  if (anchorX === 'center') {
+    return 'translateX(-50%)';
+  }
+  return 'none';
+}
+
+/**
+ * 百千鳥（Adobe Fonts）を効かせるため、パネル見出し類も troika Text ではなく Html で描画する。
+ */
+function PanelHtmlText({
+  text,
+  x,
+  startY,
+  maxWidth,
+  fontSize,
+  lineHeight = 1.35,
+  color,
+  letterSpacing,
+  anchorX,
+  textAlign,
+  opacity,
+  role,
+}: {
+  text: string;
+  x: number;
+  startY: number;
+  maxWidth: number;
+  fontSize: number;
+  lineHeight?: number;
+  color: string;
+  letterSpacing?: number | string;
+  anchorX: 'left' | 'right' | 'center';
+  textAlign: 'left' | 'right' | 'center';
+  opacity: number;
+  role: PanelTextRole;
+}) {
+  return (
+    <Html position={[x, startY, 0]} style={{ pointerEvents: 'none' }}>
+      <div
+        className={PANEL_TEXT_ROLE_CLASS[role]}
+        style={{
+          transform: anchorTransformFor(anchorX),
+          width: maxWidth,
+          fontSize,
+          lineHeight,
+          color,
+          textAlign,
+          letterSpacing,
+          opacity,
+          transition: 'opacity 0.2s linear',
+          wordBreak: 'break-word',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {text}
+      </div>
+    </Html>
+  );
+}
 
 /** クレーターは凹凸をモデリングせず、平らなテクスチャ画像として貼る。 */
 function createPlanetTexture(): THREE.CanvasTexture {
@@ -77,6 +150,8 @@ interface TextPanelProps {
   rotatingGroupRef: RefObject<THREE.Group | null>;
   /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
   onNavigate?: (path: string) => void;
+  /** 現在の共有ステップ番号。花びらグラフィックの選択リセット判定に使う（PanelLayoutProps参照）。 */
+  stepIndex: number;
 }
 
 /** この角度差を超えたら完全に不可視（cos(diff) がこの値未満） */
@@ -91,12 +166,42 @@ const PANEL_FADE_COS_MAX = 0.7;
 const PANEL_HOOK_Y = 0.84;
 const PANEL_HEADING_Y = 0.74;
 
+/** 花びらグラフィック（必須ルート・深掘りルート共通）を画面内側へ寄せる量（px）。 */
+const PETAL_GRAPHIC_INWARD_SHIFT_PX = 32;
+
+/**
+ * skyHeightに対するこの割合のY位置が、ちょうどキャンバス（画面）の上下中央になる。
+ * オルソグラフィックカメラはワールドY=0を画面の上下中央に投影する。頂点（dy=0）のワールドYは
+ * size.height*(0.5 - HOME_INTRO_HORIZON_RATIO)、skyHeightはsize.height*HOME_INTRO_HORIZON_RATIOなので、
+ * 「ワールドY=0になるdy」をskyHeightで割った割合は 1 - 0.5/HOME_INTRO_HORIZON_RATIO で求まる
+ * （HOME_INTRO_HORIZON_RATIOが変わっても追従する）。
+ */
+const SCREEN_VERTICAL_CENTER_FRACTION = 1 - 0.5 / HOME_INTRO_HORIZON_RATIO;
+
+/**
+ * 必須ルート画面右端固定のNavigationIndicator（home-intro.css .nav-indicator）のジオメトリ。
+ * 本文の右端がこのインジケーターと一定の隙間を保つよう、fraction指定ではなくpx単位で正確に逆算する
+ * （skyWidthの割合だけで位置決めすると、インジケーター自体は画面幅に応じてスケールしないpx固定サイズなので、
+ * 画面幅が変わるたびに隙間が一定にならないため）。NavigationIndicator自身は640px未満で非表示になるので、
+ * この計算も同じ幅未満では適用しない。
+ */
+const NAV_INDICATOR_RIGHT_OFFSET_PX = 24; // .nav-indicator の right
+const NAV_INDICATOR_WIDTH_PX = 182; // .nav-indicator の width（1.3倍後）
+const NAV_INDICATOR_NARROW_BREAKPOINT_PX = 640; // .nav-indicator が非表示になる境界と同じ
+/** 本文とインジケーターの間に空ける隙間（px）。 */
+const NAV_INDICATOR_TEXT_GAP_PX = 24;
+
 interface PanelLayoutProps {
   skyWidth: number;
   skyHeight: number;
   opacity: number;
   /** リンク断片がクリックされたときに呼ばれる。渡された path へ遷移させる。 */
   onNavigate?: (path: string) => void;
+  /**
+   * 現在の共有ステップ番号。花びらグラフィックの選択状態は、この値が変わるたび
+   * （進む方向・戻る方向どちらでも）リセットする（PlutchikPetalWheelをkeyで強制再マウントする）。
+   */
+  stepIndex: number;
 }
 
 interface LinkedBodyTextProps {
@@ -141,14 +246,12 @@ function LinkedBodyText({
   opacity,
   onNavigate,
 }: LinkedBodyTextProps) {
-  const anchorTransform =
-    anchorX === 'right' ? 'translateX(-100%)' : anchorX === 'center' ? 'translateX(-50%)' : 'none';
-
   return (
     <Html position={[x, startY, 0]} style={{ pointerEvents: 'none' }}>
       <div
+        className={PANEL_TEXT_ROLE_CLASS.body}
         style={{
-          transform: anchorTransform,
+          transform: anchorTransformFor(anchorX),
           width: maxWidth,
           fontSize,
           lineHeight,
@@ -192,64 +295,67 @@ function WelcomePanelLayout({
 }: PanelLayoutProps & { content: WelcomePanelContent }) {
   const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.5;
-  const rightX = skyWidth * 0.42;
-  const bodyFontSize = skyHeight * 0.026;
+  // 本文（右揃え）の右端は、NavigationIndicatorと常に24px空くようpx単位で正確に計算する
+  // （インジケーターが表示される640px以上のときのみ。640px未満は非表示になるため元の比率のままでよい）。
+  const rightX =
+    skyWidth >= NAV_INDICATOR_NARROW_BREAKPOINT_PX
+      ? skyWidth / 2 - (NAV_INDICATOR_RIGHT_OFFSET_PX + NAV_INDICATOR_WIDTH_PX + NAV_INDICATOR_TEXT_GAP_PX)
+      : skyWidth * 0.42;
+  const bodyFontSize = skyHeight * 0.029;
   // 折り返し幅を文字数4つ分ほど広げ、「か?」「です。」のような孤立した末尾の1〜2文字が
-  // 単独の行にならないようにする（改行位置＝\nの箇所は変更しない。あくまで自動折り返しの幅だけ広げる）。
+  // 単独の行にならないようにする。
   const rightWidth = skyWidth * 0.48 + bodyFontSize * 8;
   return (
     <>
-      <Text
-        position={[leftX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={leftX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[leftX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={leftX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
-      <Text
-        position={[leftX, skyHeight * 0.5, 0]}
-        fontSize={skyHeight * 0.026}
+        opacity={opacity}
+        role="heading"
+      />
+      <PanelHtmlText
+        text={content.subcopy}
+        x={leftX}
+        startY={skyHeight * 0.5}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.024}
+        lineHeight={1.5}
         color="#c39bd3"
+        letterSpacing="0.06em"
         anchorX="left"
-        anchorY="top"
-        letterSpacing={0.08}
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.subcopy}
-      </Text>
+        opacity={opacity}
+        role="subcopy"
+      />
       <LinkedBodyText
         segments={content.body}
         x={rightX}
         startY={skyHeight * 0.42}
         maxWidth={rightWidth}
         fontSize={bodyFontSize}
-        lineHeight={1.6}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#c39bd3"
         anchorX="right"
@@ -270,47 +376,48 @@ function SplitGraphicPanelLayout({
   skyHeight,
   opacity,
   onNavigate,
+  stepIndex,
 }: PanelLayoutProps & { content: SplitGraphicPanelContent }) {
-  const leftX = -skyWidth * 0.46;
+  // 左マージンはようこそパネル（WelcomePanelLayout）と揃える。
+  const leftX = -skyWidth * 0.42;
   const leftWidth = skyWidth * 0.42;
   return (
     <>
-      <Text
-        position={[leftX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={leftX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[leftX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={leftX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={leftWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX="left"
-        anchorY="top"
-        maxWidth={leftWidth}
         textAlign="left"
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
+        opacity={opacity}
+        role="heading"
+      />
       <LinkedBodyText
         segments={content.body}
         x={leftX}
         startY={skyHeight * 0.6}
         maxWidth={leftWidth}
-        fontSize={skyHeight * 0.026}
-        lineHeight={1.6}
+        fontSize={skyHeight * 0.029}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#c39bd3"
         anchorX="left"
@@ -326,14 +433,23 @@ function SplitGraphicPanelLayout({
         クリックを花びらまで届かせるため pointerEvents は 'auto'（ホイールイベントの伝播はヒットテストと無関係のため、
         スクロールジェスチャーには影響しない）。
       */}
-      <Html center position={[skyWidth * 0.24, skyHeight * 0.52, 0]} style={{ pointerEvents: 'auto' }}>
+      <Html
+        center
+        position={[
+          skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX,
+          skyHeight * SCREEN_VERTICAL_CENTER_FRACTION,
+          0,
+        ]}
+        style={{ pointerEvents: 'auto' }}
+      >
         <div style={{ opacity, transition: 'opacity 0.2s linear', pointerEvents: opacity > 0.5 ? 'auto' : 'none' }}>
           {/*
             PlutchikPetalWheel は既定で maxWidth:100% を付ける。Html のラッパーdivは
             transformのみで明示的な width を持たないため、100%の基準が定まらず幅が0に
             つぶれてしまう。ここでは固定pxで表示したいので maxWidth を打ち消す。
           */}
-          <PlutchikPetalWheel size={PETAL_WHEEL_HTML_SIZE} style={{ maxWidth: 'none' }} />
+          {/* key={stepIndex}：パネルをスクロールして移動したら（進む・戻る方向とも）選択状態をリセットする */}
+          <PlutchikPetalWheel key={stepIndex} size={PETAL_WHEEL_HTML_SIZE} style={{ maxWidth: 'none' }} />
         </div>
       </Html>
     </>
@@ -344,7 +460,7 @@ function SplitGraphicPanelLayout({
  * 深掘りルート用。必須ルート02（ようこそパネル＝WelcomePanelLayout）と同じ左右分割レイアウト。
  * フック・見出しは片側、本文はもう片側。content.mirrored が true なら左右を入れ替える
  * （隣り合うパネル同士で交互に配置するため。深掘りは本文がリンクを含まない単純な文字列なので
- * 通常の<Text>で描画する）。
+ * LinkedBodyText で描画する）。
  */
 function SimplePanelLayout({
   content,
@@ -361,7 +477,7 @@ function SimplePanelLayout({
   const headingWidth = skyWidth * 0.5;
   const headingAnchorX: 'left' | 'right' = mirrored ? 'right' : 'left';
 
-  const bodyFontSize = skyHeight * 0.026;
+  const bodyFontSize = skyHeight * 0.029;
   // WelcomePanelLayoutと同様、末尾の孤立行を防ぐため文字数8つ分ほど幅を広げてある。
   const bodyWidth = skyWidth * 0.48 + bodyFontSize * 8;
   // 本文はフック・見出しと同じ基準位置・同じ揃え方向にする（左右どちらの配置でも1つのカラムとして揃える）。
@@ -370,39 +486,37 @@ function SimplePanelLayout({
 
   return (
     <>
-      <Text
-        position={[headingX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={headingX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={headingWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX={headingAnchorX}
-        anchorY="top"
-        maxWidth={headingWidth}
         textAlign={headingAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[headingX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={headingX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={headingWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX={headingAnchorX}
-        anchorY="top"
-        maxWidth={headingWidth}
         textAlign={headingAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
+        opacity={opacity}
+        role="heading"
+      />
       {/*
         本文は必須ルート（WelcomePanelLayout等）のLinkedBodyTextと全く同じコンポーネント・スタイルで描画する。
-        troika-three-text（<Text>）とHTML（<Html>）はフォント解決・アンチエイリアシングが異なり、
-        fontSize/lineHeightの数値を揃えるだけでは見た目が一致しないため、同じHTMLレンダリング経路に統一する。
+        百千鳥は Adobe Fonts（CSS）経由のため、見出しも含め Html 経路に統一している。
         深掘りの本文にリンクは無いので、リンクなしの単一セグメントとして渡す。
       */}
       <LinkedBodyText
@@ -411,7 +525,7 @@ function SimplePanelLayout({
         startY={skyHeight * 0.52}
         maxWidth={bodyWidth}
         fontSize={bodyFontSize}
-        lineHeight={1.6}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#d8cfe0"
         anchorX={bodyAnchorX}
@@ -423,9 +537,9 @@ function SimplePanelLayout({
 }
 
 /** 花2輪を横に並べたサイズ（px）。通常幅／狭い画面（NavigationIndicatorと同じ640px基準）で切り替える。 */
-const DUAL_WHEEL_SIZE = 200;
-const DUAL_WHEEL_SIZE_NARROW = 148;
-const DUAL_WHEEL_GAP = 20;
+const DUAL_WHEEL_SIZE = 240;
+const DUAL_WHEEL_SIZE_NARROW = 110;
+const DUAL_WHEEL_GAP = 16;
 const DUAL_WHEEL_NARROW_BREAKPOINT_PX = 640;
 
 /**
@@ -436,6 +550,9 @@ const DUAL_WHEEL_NARROW_BREAKPOINT_PX = 640;
  * 2輪はそれぞれ独立に1枚ずつ花びらを選択できる（同じ花びらを再クリックで選択解除）。
  * 両方選択されると、円環距離に応じた組み合わせ感情（同じ感情ならピュア感情、対極なら
  * メッセージ）を2輪の下・中央にフェードイン表示する。
+ *
+ * 呼び出し側（TextPanel）がkey={stepIndex}を渡してこのコンポーネントごと強制再マウントする。
+ * パネルをスクロールして移動したら（進む・戻る方向とも）選択状態・組み合わせ結果を丸ごとリセットするため。
  */
 function DualWheelPanelLayout({
   content,
@@ -450,52 +567,56 @@ function DualWheelPanelLayout({
   const isNarrow = skyWidth < DUAL_WHEEL_NARROW_BREAKPOINT_PX;
   const wheelSize = isNarrow ? DUAL_WHEEL_SIZE_NARROW : DUAL_WHEEL_SIZE;
 
-  const textX = isNarrow ? 0 : -skyWidth * 0.46;
-  const textWidth = isNarrow ? skyWidth * 0.82 : skyWidth * 0.42;
+  // 左位置は深掘り「感情ラベリング」パネル（SimplePanelLayoutのleftSideX = -skyWidth*0.42）に揃える。
+  // 右へ寄る分、花びらグラフィックとの間隔を保つため本文の折り返し幅は少し狭める。
+  const textX = isNarrow ? 0 : -skyWidth * 0.42;
+  const textWidth = isNarrow ? skyWidth * 0.94 : skyWidth * 0.38;
   const textAnchorX: 'left' | 'center' = isNarrow ? 'center' : 'left';
 
-  const bodyFontSize = skyHeight * 0.026;
-  const graphicsX = isNarrow ? 0 : skyWidth * 0.24;
-  const graphicsY = isNarrow ? skyHeight * 0.22 : skyHeight * 0.52;
+  // 狭い画面では本文が長く（プレースホルダーの仮テキストが特に長い）折り返し行数がかさむため、
+  // 小さめ・幅広にして行数を抑える。花2輪はさらに下（地平線に立つ人物と重ならない最小限の位置）へ寄せる。
+  const bodyFontSize = isNarrow ? skyHeight * 0.021 : skyHeight * 0.029;
+  // 花2輪＋組み合わせ感情名のグラフィック全体を、さらに左へ48px寄せる。
+  const graphicsX = (isNarrow ? 0 : skyWidth * 0.24 - PETAL_GRAPHIC_INWARD_SHIFT_PX) - 48;
+  const graphicsY = isNarrow ? skyHeight * 0.14 : skyHeight * SCREEN_VERTICAL_CENTER_FRACTION;
 
   return (
     <>
-      <Text
-        position={[textX, skyHeight * PANEL_HOOK_Y, 0]}
-        fontSize={skyHeight * 0.032}
+      <PanelHtmlText
+        text={content.hook}
+        x={textX}
+        startY={skyHeight * PANEL_HOOK_Y}
+        maxWidth={textWidth}
+        fontSize={skyHeight * 0.028}
+        lineHeight={1.45}
         color="#9f8aaa"
+        letterSpacing="0.08em"
         anchorX={textAnchorX}
-        anchorY="top"
-        maxWidth={textWidth}
         textAlign={textAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.hook}
-      </Text>
-      <Text
-        position={[textX, skyHeight * PANEL_HEADING_Y, 0]}
-        fontSize={skyHeight * 0.06}
-        lineHeight={1.3}
+        opacity={opacity}
+        role="hook"
+      />
+      <PanelHtmlText
+        text={content.heading}
+        x={textX}
+        startY={skyHeight * PANEL_HEADING_Y}
+        maxWidth={textWidth}
+        fontSize={skyHeight * 0.068}
+        lineHeight={1.22}
         color="#f4ecf7"
+        letterSpacing="0.02em"
         anchorX={textAnchorX}
-        anchorY="top"
-        maxWidth={textWidth}
         textAlign={textAnchorX}
-        overflowWrap="break-word"
-        fillOpacity={opacity}
-        sdfGlyphSize={256}
-      >
-        {content.heading}
-      </Text>
+        opacity={opacity}
+        role="heading"
+      />
       <LinkedBodyText
         segments={[{ text: content.body }]}
         x={textX}
         startY={skyHeight * 0.6}
         maxWidth={textWidth}
         fontSize={bodyFontSize}
-        lineHeight={1.6}
+        lineHeight={1.75}
         color="#d8cfe0"
         linkColor="#d8cfe0"
         anchorX={textAnchorX}
@@ -520,28 +641,17 @@ function DualWheelPanelLayout({
           }}
         >
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: DUAL_WHEEL_GAP }}>
-            <PlutchikPetalWheel
-              size={wheelSize}
-              showLabel={false}
-              style={{ maxWidth: 'none' }}
-              onSelectionChange={setSelectedLeft}
-            />
-            <PlutchikPetalWheel
-              size={wheelSize}
-              showLabel={false}
-              style={{ maxWidth: 'none' }}
-              onSelectionChange={setSelectedRight}
-            />
+            <PlutchikPetalWheel size={wheelSize} style={{ maxWidth: 'none' }} onSelectionChange={setSelectedLeft} />
+            <PlutchikPetalWheel size={wheelSize} style={{ maxWidth: 'none' }} onSelectionChange={setSelectedRight} />
           </div>
           <div
+            key={combined?.name ?? 'none'}
+            className={`dual-wheel-badge font-momochidori font-momochidori--bold${combined ? ' dual-wheel-badge--active' : ''}`}
             style={{
-              fontSize: '1.1em',
-              fontWeight: 600,
-              letterSpacing: '0.06em',
-              minHeight: '1.3em',
-              color: combined?.color ?? '#d8cfe0',
+              fontSize: '2.05em',
+              backgroundColor: combined?.color ?? 'transparent',
               opacity: combined ? 1 : 0,
-              transition: 'opacity 0.3s ease, color 0.3s ease',
+              ...(combined ? ({ '--dual-wheel-glow-color': combined.color } as CSSProperties) : {}),
             }}
           >
             {combined?.name ?? ' '}
@@ -567,7 +677,16 @@ function DualWheelPanelLayout({
  * 「現在の共有回転角と、この板固有の角度との差」から毎フレーム導出し、
  * 頂点付近だけなめらかに読める状態になるようにする（板自体を個別にアニメーションさせるものではない）。
  */
-function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupRef, onNavigate }: TextPanelProps) {
+function TextPanel({
+  radius,
+  angle,
+  content,
+  skyWidth,
+  skyHeight,
+  rotatingGroupRef,
+  onNavigate,
+  stepIndex,
+}: TextPanelProps) {
   const [opacity, setOpacity] = useState(0);
   const position: [number, number, number] = [
     0,
@@ -611,6 +730,7 @@ function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupR
             skyHeight={skyHeight}
             opacity={opacity}
             onNavigate={onNavigate}
+            stepIndex={stepIndex}
           />
         )}
         {content.layout === 'split-graphic' && (
@@ -620,13 +740,27 @@ function TextPanel({ radius, angle, content, skyWidth, skyHeight, rotatingGroupR
             skyHeight={skyHeight}
             opacity={opacity}
             onNavigate={onNavigate}
+            stepIndex={stepIndex}
           />
         )}
         {content.layout === 'simple' && (
-          <SimplePanelLayout content={content} skyWidth={skyWidth} skyHeight={skyHeight} opacity={opacity} />
+          <SimplePanelLayout
+            content={content}
+            skyWidth={skyWidth}
+            skyHeight={skyHeight}
+            opacity={opacity}
+            stepIndex={stepIndex}
+          />
         )}
         {content.layout === 'dual-wheel' && (
-          <DualWheelPanelLayout content={content} skyWidth={skyWidth} skyHeight={skyHeight} opacity={opacity} />
+          <DualWheelPanelLayout
+            key={stepIndex}
+            content={content}
+            skyWidth={skyWidth}
+            skyHeight={skyHeight}
+            opacity={opacity}
+            stepIndex={stepIndex}
+          />
         )}
       </group>
     </group>
@@ -720,6 +854,7 @@ function PlanetMesh({
             skyHeight={skyHeight}
             rotatingGroupRef={rotatingRef}
             onNavigate={onNavigate}
+            stepIndex={stepIndex}
           />
         ))}
       </group>

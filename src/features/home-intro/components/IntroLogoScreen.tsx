@@ -4,8 +4,8 @@ import { SITE_NAME } from '../../../constants/site';
 export function IntroLogoScreen() {
   return (
     <div className="home-intro-logo">
-      <p className="home-intro-logo__mark">{SITE_NAME}</p>
-      <p className="home-intro-logo__hint">SCROLL</p>
+      <p className="home-intro-logo__mark font-momochidori font-momochidori--brand">{SITE_NAME}</p>
+      <p className="home-intro-logo__hint font-momochidori font-momochidori--medium">SCROLL</p>
     </div>
   );
 }

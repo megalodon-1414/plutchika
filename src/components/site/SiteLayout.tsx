@@ -1,4 +1,4 @@
-import { Link, Outlet } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { ROUTES } from '../../routes/paths';
 
 interface SiteLayoutProps {
@@ -7,8 +7,16 @@ interface SiteLayoutProps {
 }
 
 export function SiteLayout({ showSiteChrome = true }: SiteLayoutProps) {
+  const location = useLocation();
+
   if (!showSiteChrome) {
-    return <Outlet />;
+    // key={location.pathname}でページ遷移のたびに新しいDOMノードとして再マウントし、
+    // fade-inアニメーション（index.cssのsite-page-fade-in）を毎回再生させる。
+    return (
+      <div key={location.pathname} className="site-page-fade-in" style={{ height: '100%' }}>
+        <Outlet />
+      </div>
+    );
   }
 
   return (
