@@ -44,6 +44,10 @@ export const TELESCOPE_CLICK_DRAG_THRESHOLD_PX = 6;
  * 実カメラはダンパで遅れて追従する。
  */
 export const TELESCOPE_ORBIT_SENSITIVITY = 0.00055;
+/** スマホ時のドラッグ感度倍率（全レイヤー共通） */
+export const TELESCOPE_MOBILE_DRAG_SENSITIVITY_MUL = 1.55;
+/** スマホ判定の画面幅上限（感情説明UIと同じ） */
+export const TELESCOPE_MOBILE_MAX_WIDTH_PX = 640;
 /** 正面からの仰角中心 */
 export const TELESCOPE_ORBIT_PHI_CENTER = Math.PI / 2 - 0.03;
 /**

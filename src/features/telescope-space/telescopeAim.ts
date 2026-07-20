@@ -14,6 +14,14 @@ export const TELESCOPE_AIM = {
   mode: 'cursor' as TelescopeAimMode,
 };
 
+/** 照準モードを切り替える。cursor→center 時はポインタ状態もクリアする */
+export function setTelescopeAimMode(mode: TelescopeAimMode): void {
+  TELESCOPE_AIM.mode = mode;
+  if (mode === 'center') {
+    clearTelescopePointer();
+  }
+}
+
 const pointerNdc = { x: 0, y: 0, valid: false };
 
 let pinHidden = false;
@@ -46,6 +54,9 @@ export function updateTelescopePointerFromClient(
   clientY: number,
   rect: DOMRectReadOnly,
 ): void {
+  if (TELESCOPE_AIM.mode === 'center') {
+    return;
+  }
   if (rect.width <= 0 || rect.height <= 0) {
     return;
   }

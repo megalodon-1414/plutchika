@@ -9,5 +9,5 @@ export {
 } from './constants';
 export type { TelescopeZoomPhase, TelescopeSettledPhase } from './constants';
 /** 検知照準モード（`TELESCOPE_AIM.mode = 'center' | 'cursor'`） */
-export { TELESCOPE_AIM } from './telescopeAim';
+export { TELESCOPE_AIM, setTelescopeAimMode } from './telescopeAim';
 export type { TelescopeAimMode } from './telescopeAim';

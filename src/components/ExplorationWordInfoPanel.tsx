@@ -4,6 +4,7 @@ import { EMOTION_INTENSITY_MAX } from '../utils/emotionPlotBridge';
 import { getExplorationInfoUiLayout } from '../utils/explorationInfoUiLayout';
 import { getPrimaryEmotionColor } from '../utils/emotionPlotBridge';
 import { getEmotionUiTheme } from '../utils/emotionUiTheme';
+import { LoopingTickerText } from './LoopingTickerText';
 
 interface ExplorationWordInfoPanelProps {
   plot: UserPlotRow;
@@ -95,10 +96,6 @@ export function ExplorationWordInfoPanel({
           0%, 100% { opacity: .45; transform: translateX(0); }
           50% { opacity: 1; transform: translateX(-4px); }
         }
-        @keyframes telescopeCurrentWordTicker {
-          from { transform: translateX(0); }
-          to { transform: translateX(-45%); }
-        }
       `}</style>
 
       <div
@@ -171,21 +168,14 @@ export function ExplorationWordInfoPanel({
                 position: 'relative',
               }}
             >
-              <p
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  margin: 0,
-                  fontSize: layout.tickerFontSize,
-                  letterSpacing: '0.14em',
-                  lineHeight: `${layout.tickerHeight}px`,
-                  color: theme.accentMuted,
-                  whiteSpace: 'nowrap',
-                  animation: 'telescopeCurrentWordTicker 4.2s linear infinite',
-                }}
-              >
-                CURRENT WORD
-              </p>
+              <LoopingTickerText
+                text="CURRENT WORD"
+                fontSize={layout.tickerFontSize}
+                letterSpacing="0.14em"
+                lineHeight={`${layout.tickerHeight}px`}
+                color={theme.accentMuted}
+                durationSec={7.2}
+              />
             </div>
             <h2
               className="font-momochidori font-momochidori--medium"

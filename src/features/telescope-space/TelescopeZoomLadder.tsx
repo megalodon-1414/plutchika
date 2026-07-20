@@ -19,12 +19,18 @@ const LEVEL_LABEL: Record<TelescopeSettledPhase, string> = {
 /** 感情を選んだときのレイヤー（LAYER 01 → 02 遷移時） */
 const SELECTION_LAYER: TelescopeSettledPhase = 'wide';
 const LEVEL_SLOT_SIZE = 22;
+const LEVEL_SLOT_SIZE_HORIZONTAL = 16;
+const LEVEL_DOT_SIZE = 16;
+const LEVEL_DOT_SIZE_HORIZONTAL = 11;
 const LEVEL_GAP = 48;
-const LEVEL_STEP = LEVEL_SLOT_SIZE + LEVEL_GAP;
+const LEVEL_GAP_HORIZONTAL = 20;
 const PREVIOUS_LETTERS = [...'PREVIOUS'];
-const PREVIOUS_LETTER_STEP_DEG = 18;
-const PREVIOUS_LETTER_START_DEG =
-  -((PREVIOUS_LETTERS.length - 1) * PREVIOUS_LETTER_STEP_DEG) / 2;
+const PREVIOUS_LETTER_STEP_DEG = 22;
+const PREVIOUS_LETTER_STEP_DEG_HORIZONTAL = 26;
+const PREVIOUS_ORBIT_RADIUS = 22;
+const PREVIOUS_ORBIT_RADIUS_HORIZONTAL = 13;
+const PREVIOUS_LETTER_SIZE = '0.48rem';
+const PREVIOUS_LETTER_SIZE_HORIZONTAL = '0.3rem';
 
 export interface TelescopeZoomLadderEmotion {
   label: string;
@@ -42,10 +48,23 @@ interface TelescopeZoomLadderProps {
   selectedDetailEmotion?: TelescopeZoomLadderEmotion | null;
   /** Layer4へ進むときに選んだ感情点 */
   selectedExplorationEmotion?: TelescopeZoomLadderEmotion | null;
+  /** 縦並び（デスクトップ）/ 横並び（スマホ） */
+  orientation?: 'vertical' | 'horizontal';
+  /** 各ドット横の感情ラベルを出すか */
+  showEmotionLabels?: boolean;
 }
 
 /** 各文字の下側を円の中心へ向けたまま、反時計回りに周回する。 */
-function PreviousOrbitLabel() {
+function PreviousOrbitLabel({ compact = false }: { compact?: boolean }) {
+  const orbitRadius = compact
+    ? PREVIOUS_ORBIT_RADIUS_HORIZONTAL
+    : PREVIOUS_ORBIT_RADIUS;
+  const letterStep = compact
+    ? PREVIOUS_LETTER_STEP_DEG_HORIZONTAL
+    : PREVIOUS_LETTER_STEP_DEG;
+  const letterStart =
+    -((PREVIOUS_LETTERS.length - 1) * letterStep) / 2;
+  const ringSize = orbitRadius * 2;
   return (
     <div
       aria-hidden
@@ -64,8 +83,8 @@ function PreviousOrbitLabel() {
           position: 'absolute',
           left: 0,
           top: 0,
-          width: 44,
-          height: 44,
+          width: ringSize,
+          height: ringSize,
           border: '1px solid rgba(190, 205, 240, 0.3)',
           borderRadius: '50%',
           transform: 'translate(-50%, -50%)',
@@ -73,8 +92,7 @@ function PreviousOrbitLabel() {
         }}
       />
       {PREVIOUS_LETTERS.map((letter, index) => {
-        const angle =
-          PREVIOUS_LETTER_START_DEG + index * PREVIOUS_LETTER_STEP_DEG;
+        const angle = letterStart + index * letterStep;
         return (
           <span
             key={`${letter}-${index}`}
@@ -86,10 +104,12 @@ function PreviousOrbitLabel() {
               height: '1em',
               display: 'grid',
               placeItems: 'center',
-              transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-22px)`,
+              transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-${orbitRadius}px)`,
               transformOrigin: 'center',
               color: 'rgba(210, 220, 245, 0.88)',
-              fontSize: '0.58rem',
+              fontSize: compact
+                ? PREVIOUS_LETTER_SIZE_HORIZONTAL
+                : PREVIOUS_LETTER_SIZE,
               fontWeight: 650,
               lineHeight: 1,
               textShadow: '0 0 8px rgba(0,0,0,0.65)',
@@ -104,7 +124,7 @@ function PreviousOrbitLabel() {
 }
 
 /**
- * のぞき穴の外右端に縦並びの拡大率ドット。
+ * 拡大率ドット。デスクトップは右端縦並び、スマホは画面上端横並び。
  * 押下はズームダウンのみ（前進は不可）。
  */
 export function TelescopeZoomLadder({
@@ -114,19 +134,27 @@ export function TelescopeZoomLadder({
   selectedEmotion = null,
   selectedDetailEmotion = null,
   selectedExplorationEmotion = null,
+  orientation = 'vertical',
+  showEmotionLabels = true,
 }: TelescopeZoomLadderProps) {
   const currentIndex = ZOOM_LEVELS.indexOf(current);
   const previousLevel =
     currentIndex > 0 ? ZOOM_LEVELS[currentIndex - 1] : null;
+  const horizontal = orientation === 'horizontal';
+  const levelGap = horizontal ? LEVEL_GAP_HORIZONTAL : LEVEL_GAP;
+  const slotSize = horizontal ? LEVEL_SLOT_SIZE_HORIZONTAL : LEVEL_SLOT_SIZE;
+  const dotSize = horizontal ? LEVEL_DOT_SIZE_HORIZONTAL : LEVEL_DOT_SIZE;
+  const levelStep = slotSize + levelGap;
+  const lineInset = Math.round(slotSize / 2);
 
   return (
     <div
       style={{
         position: 'relative',
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: horizontal ? 'row' : 'column',
         alignItems: 'center',
-        gap: LEVEL_GAP,
+        gap: levelGap,
         pointerEvents: 'auto',
       }}
       role="group"
@@ -139,19 +167,32 @@ export function TelescopeZoomLadder({
         }
       `}</style>
 
-      {/* 点同士をつなぐ縦線 */}
+      {/* 点同士をつなぐ線 */}
       <div
         aria-hidden
-        style={{
-          position: 'absolute',
-          top: 11,
-          bottom: 11,
-          left: '50%',
-          width: 1.5,
-          transform: 'translateX(-50%)',
-          background: 'rgba(180, 190, 220, 0.35)',
-          pointerEvents: 'none',
-        }}
+        style={
+          horizontal
+            ? {
+                position: 'absolute',
+                left: lineInset,
+                right: lineInset,
+                top: '50%',
+                height: 1.25,
+                transform: 'translateY(-50%)',
+                background: 'rgba(180, 190, 220, 0.35)',
+                pointerEvents: 'none',
+              }
+            : {
+                position: 'absolute',
+                top: lineInset,
+                bottom: lineInset,
+                left: '50%',
+                width: 1.5,
+                transform: 'translateX(-50%)',
+                background: 'rgba(180, 190, 220, 0.35)',
+                pointerEvents: 'none',
+              }
+        }
       />
 
       {/* 選択中の光だけをレベル間で連続移動させる */}
@@ -160,15 +201,21 @@ export function TelescopeZoomLadder({
         style={{
           position: 'absolute',
           zIndex: 3,
-          top: 0,
-          left: '50%',
-          width: LEVEL_SLOT_SIZE,
-          height: LEVEL_SLOT_SIZE,
+          top: horizontal ? '50%' : 0,
+          left: horizontal ? 0 : '50%',
+          width: slotSize,
+          height: slotSize,
           borderRadius: '50%',
-          border: '2px solid rgba(244, 236, 247, 0.95)',
+          border: horizontal
+            ? '1.5px solid rgba(244, 236, 247, 0.95)'
+            : '2px solid rgba(244, 236, 247, 0.95)',
           background: 'rgba(244, 236, 247, 0.92)',
-          boxShadow: '0 0 14px rgba(220, 230, 255, 0.72)',
-          transform: `translateX(-50%) translateY(${currentIndex * LEVEL_STEP}px)`,
+          boxShadow: horizontal
+            ? '0 0 10px rgba(220, 230, 255, 0.65)'
+            : '0 0 14px rgba(220, 230, 255, 0.72)',
+          transform: horizontal
+            ? `translateY(-50%) translateX(${currentIndex * levelStep}px)`
+            : `translateX(-50%) translateY(${currentIndex * levelStep}px)`,
           transition:
             'transform 720ms cubic-bezier(0.22, 0.61, 0.36, 1)',
           pointerEvents: 'none',
@@ -180,9 +227,12 @@ export function TelescopeZoomLadder({
         const isPrevious = level === previousLevel;
         const canRetreat = !busy && index < currentIndex;
         const showSelectedEmotion =
-          Boolean(selectedEmotion) && level === SELECTION_LAYER;
-        const slotEmotion =
-          showSelectedEmotion
+          showEmotionLabels &&
+          Boolean(selectedEmotion) &&
+          level === SELECTION_LAYER;
+        const slotEmotion = !showEmotionLabels
+          ? null
+          : showSelectedEmotion
             ? selectedEmotion
             : level === 'detail'
               ? selectedDetailEmotion
@@ -199,8 +249,8 @@ export function TelescopeZoomLadder({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: LEVEL_SLOT_SIZE,
-              height: LEVEL_SLOT_SIZE,
+              width: slotSize,
+              height: slotSize,
             }}
           >
             {slotEmotion ? (
@@ -223,7 +273,7 @@ export function TelescopeZoomLadder({
               </span>
             ) : null}
 
-            {isPrevious ? <PreviousOrbitLabel /> : null}
+            {isPrevious ? <PreviousOrbitLabel compact={horizontal} /> : null}
 
             <button
               type="button"
@@ -243,19 +293,19 @@ export function TelescopeZoomLadder({
               style={{
                 position: 'relative',
                 zIndex: 1,
-                width: 16,
-                height: 16,
+                width: dotSize,
+                height: dotSize,
                 padding: 0,
                 borderRadius: '50%',
                 border: isPrevious
-                    ? '1.5px solid rgba(200, 210, 240, 0.65)'
-                    : '1.5px solid rgba(180, 190, 220, 0.4)',
+                  ? '1.5px solid rgba(200, 210, 240, 0.65)'
+                  : '1.5px solid rgba(180, 190, 220, 0.4)',
                 background: canRetreat
-                    ? 'rgba(160, 175, 220, 0.5)'
-                    : 'rgba(80, 90, 120, 0.35)',
+                  ? 'rgba(160, 175, 220, 0.5)'
+                  : 'rgba(80, 90, 120, 0.35)',
                 boxShadow: isPrevious
-                    ? '0 0 10px rgba(180, 200, 240, 0.35)'
-                    : 'none',
+                  ? '0 0 10px rgba(180, 200, 240, 0.35)'
+                  : 'none',
                 cursor: canRetreat ? 'pointer' : 'default',
                 opacity: busy && !isCurrent ? 0.45 : 1,
                 transition:

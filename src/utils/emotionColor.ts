@@ -22,6 +22,32 @@ export function complementaryHex(hex: string): string {
   return `#${color.getHexString()}`;
 }
 
+/**
+ * 基調色の周辺色（色相を少しずらした同系色）。
+ * UIグラデーション用。黒は混ぜない。
+ */
+export function analogousEmotionColors(
+  hex: string,
+): readonly [string, string, string, string] {
+  const base = new THREE.Color(hex);
+  const hsl = { h: 0, s: 0, l: 0 };
+  base.getHSL(hsl);
+  const mk = (dh: number, dl: number, ds = 0) => {
+    const color = new THREE.Color();
+    color.setHSL(
+      (hsl.h + dh + 1) % 1,
+      THREE.MathUtils.clamp(hsl.s + ds, 0.4, 1),
+      THREE.MathUtils.clamp(hsl.l + dl, 0.32, 0.7),
+    );
+    return `#${color.getHexString()}`;
+  };
+  // シームレスループのため先頭色を末尾にも置く
+  const a = mk(-0.07, 0.1, 0.05);
+  const b = mk(0, -0.04, 0.08);
+  const c = mk(0.09, 0.06, 0);
+  return [a, b, c, a];
+}
+
 /** 純感情：強度が高いほど鮮やか・濃い */
 export function pureColorByIntensity(hex: string, intensity: number): string {
   const color = new THREE.Color(hex);

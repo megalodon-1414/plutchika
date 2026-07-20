@@ -9,6 +9,8 @@ import {
   TELESCOPE_CAMERA_FOV,
   TELESCOPE_CLICK_DRAG_THRESHOLD_PX,
   TELESCOPE_LAYER2_ROTATE_MS,
+  TELESCOPE_MOBILE_DRAG_SENSITIVITY_MUL,
+  TELESCOPE_MOBILE_MAX_WIDTH_PX,
   TELESCOPE_ORBIT_FOLLOW_MIN_MUL,
   TELESCOPE_ORBIT_FOLLOW_RANGE,
   TELESCOPE_ORBIT_FOLLOW_SPEED,
@@ -66,15 +68,15 @@ interface TelescopeSpaceCanvasProps {
   onCanvasClickZoom?: () => void;
   onLayer2RotationComplete?: () => void;
   onViewFocus?: (focus: TelescopeViewFocus) => void;
-  /** レイヤー3の現在位置インジケータ（画面固定 HUD）との共有状態 */
+  /** ????3???????????????? HUD??????? */
   regionIndicator?: { current: TelescopeRegionIndicatorState };
-  /** レイヤー3の中央検知区画（レイヤー4入口） */
+  /** ????3????????????4??? */
   segmentFocus?: { current: TelescopeSegmentFocusState };
-  /** レイヤー4/5で選択中の感情点 */
+  /** ????4/5???????? */
   explorationPlotId?: string | null;
-  /** レイヤー5の注視点＝選択セグメント中心 */
+  /** ????5?????????????? */
   explorationSegmentIndex?: number | null;
-  /** レイヤー4 HUD（矢印）と共有するカメラ回転状態 */
+  /** ????4 HUD???????????????? */
   explorationHud?: { current: TelescopeExplorationHudState };
   onSelectExplorationPlot?: (id: string) => void;
 }
@@ -99,8 +101,8 @@ type ZoomInSubPhase =
   | 'regionSlide';
 
 /**
- * 遷移中の中間姿勢用。選択感情→原点の XY 方向を画面上にし、
- * 8感情の中心が画面上側に来るようにする。
+ * ?????????????????? XY ?????????
+ * 8???????????????????
  */
 function getFocusScreenUp(
   base: TelescopeFocusCameraPose,
@@ -135,7 +137,7 @@ function orientationLookingAt(
 }
 
 /**
- * のぞき穴に合わせ、軌道中心からの角変位を円形にクランプする。
+ * ??????????????????????????????
  */
 function clampOrbitCircular(
   theta: number,
@@ -157,7 +159,7 @@ function clampOrbitCircular(
   };
 }
 
-/** 詳細視点：横・縦で別限界 */
+/** ???????????? */
 function clampFocusOrbit(
   yaw: number,
   pitch: number,
@@ -215,8 +217,8 @@ function applyFocusPose(
   orbitYaw: number,
   orbitPitch: number,
 ) {
-  // 回転中心＝カメラ自身。位置固定、視線だけ左右・上下。
-  // up は環平面法線で固定し、正面＝選択感情方向にする。
+  // ??????????????????????????
+  // up ????????????????????????
   camera.position.set(...base.position);
 
   TMP_FORWARD.set(
@@ -245,7 +247,7 @@ function applyFocusPose(
   camera.lookAt(TMP_LOOK);
 }
 
-/** レイヤー2到着時に姿勢・画角・見回し角を正面基準へ揃える */
+/** ????2??????????????????????? */
 function settleFocusCamera(
   camera: THREE.PerspectiveCamera,
   base: TelescopeFocusCameraPose,
@@ -263,7 +265,7 @@ function applyRegionPose(
   const pose = computeTelescopeRegionCameraPose(region, progress);
   camera.position.set(...pose.position);
   TMP_LOOK.set(...pose.lookAt);
-  // バーを水平に保つため、レイヤー2と同じ平面法線を up にする。
+  // ???????????????2???????? up ????
   camera.up.copy(FOCUS_UP);
   camera.lookAt(TMP_LOOK);
 }
@@ -276,7 +278,7 @@ function applyExplorationPose(
   yaw = 0,
 ) {
   if (offset && offset.lengthSq() > 1e-8) {
-    // 注視点を支点に、カメラオフセットを xy 平面内で yaw だけ回す
+    // ????????????????? xy ???? yaw ????
     const cos = Math.cos(yaw);
     const sin = Math.sin(yaw);
     camera.position.set(
@@ -325,7 +327,7 @@ function TelescopeCameraController({
   onCanvasClickZoom?: () => void;
   onLayer2SceneChange?: (active: boolean) => void;
   onLayer2RotationComplete?: () => void;
-  /** レイヤー2到着（接近完了）＝バー登場アニメーション開始の合図 */
+  /** ????2????????????????????????? */
   onLayer2ArrivalChange?: (arrived: boolean) => void;
   onRegionProgressChange?: (progress: number) => void;
 }) {
@@ -377,7 +379,7 @@ function TelescopeCameraController({
   const toFov = useRef(TELESCOPE_CAMERA_FOV);
   const fromQuat = useRef(new THREE.Quaternion());
   const toQuat = useRef(new THREE.Quaternion());
-  /** survey 距離補間か、自由ポーズ補間か */
+  /** survey ?????????????? */
   const animKind = useRef<'survey' | 'free'>('survey');
   const animating = useRef(false);
   const targetPhase = useRef<TelescopeSettledPhase>('far');
@@ -385,7 +387,7 @@ function TelescopeCameraController({
   const zoomInSubPhase = useRef<ZoomInSubPhase | null>(null);
   const zoomInCameraLock = useRef(false);
   const rotationPosition = useRef(new THREE.Vector3());
-  /** 遷移中の screen-up（原点が上）。最終カメラは FOCUS_UP に接続する */
+  /** ???? screen-up????????????? FOCUS_UP ????? */
   const focusScreenUp = useRef(new THREE.Vector3().copy(FOCUS_UP));
   const completedRef = useRef(onZoomComplete);
   const clickZoomRef = useRef(onCanvasClickZoom);
@@ -418,10 +420,10 @@ function TelescopeCameraController({
     animDurationMs.current = TELESCOPE_FOCUS_VIEW.moveMs;
     fromPos.current.copy(rotationPosition.current);
     toPos.current.set(...pose.position);
-    // 接近中は選択した基本感情を注視したまま（見上げは次の段）
+    // ????????????????????????????
     fromLook.current.set(...getFocusEmotionPosition(focusBasicId));
     toLook.current.copy(fromLook.current);
-    // 遷移時のscreen-upから、接近中に最終の平面upへ乗り換える。
+    // ????screen-up????????????up???????
     fromFov.current = camera.fov;
     toFov.current = TELESCOPE_FOCUS_VIEW.fov;
     progress.current = 0;
@@ -430,7 +432,7 @@ function TelescopeCameraController({
   };
 
   /**
-   * 到着後: バー登場アニメーションが走り出すまで、選択感情を注視したまま待つ。
+   * ???: ?????????????????????????????????
    */
   const beginTiltWait = () => {
     if (!focusBasicId || !focusBase.current) {
@@ -451,7 +453,7 @@ function TelescopeCameraController({
     targetPhase.current = 'detail';
   };
 
-  /** 待機後: 選択感情の注視から、最終注視点（少し上）へ視線を持ち上げる */
+  /** ???: ????????????????????????????? */
   const beginTiltUpFromCloseUp = () => {
     if (!focusBasicId || !focusBase.current) {
       return;
@@ -472,7 +474,7 @@ function TelescopeCameraController({
   };
 
   /**
-   * レイヤー3到着後: 基本感情（progress=1）から24感情（0.5）へバーに沿ってスライド。
+   * ????3???: ?????progress=1???24???0.5?????????????
    */
   const beginRegionSlideToMid = () => {
     const region = regionDefinition.current;
@@ -547,7 +549,7 @@ function TelescopeCameraController({
       toPos.current.set(...from.position);
       fromLook.current.set(...from.lookAt);
       toLook.current.set(...rotatePose.lookAt);
-      // 第1段: 位置固定のまま、選択感情注視＋原点が画面上の姿勢へ回転
+      // ?1?: ???????????????????????????
       getFocusScreenUp(rotatePose, focusScreenUp.current);
       orientationLookingAt(
         fromPos.current,
@@ -574,7 +576,7 @@ function TelescopeCameraController({
         return;
       }
       regionDefinition.current = region;
-      // まず基本感情側（progress=1）へ到着し、その後24感情へスライドする
+      // ????????progress=1?????????24?????????
       regionProgress.current = 1;
       regionProgressRef.current?.(1);
       zoomInSubPhase.current = 'regionArrive';
@@ -633,7 +635,7 @@ function TelescopeCameraController({
       applyRegionPose(camera, region, regionProgress.current);
       fromPos.current.copy(camera.position);
       fromLook.current.copy(TMP_LOOK);
-      // 注視点は選択点ではなく、選択セグメントの中心
+      // ??????????????????????
       const segmentIndex =
         explorationSegmentIndex ??
         getLayer3SegmentIndexForPlot(region, plot);
@@ -767,7 +769,7 @@ function TelescopeCameraController({
         layer2SceneRef.current?.(false);
         camera.fov = TELESCOPE_EXPLORATION_VIEW.fov;
         camera.updateProjectionMatrix();
-        // 点間移動の追従は useFrame 側。ここではモード定着だけ行う。
+        // ???????? useFrame ????????????????
       }
     } else if (zoomPhase === 'detail' && focusBasicId) {
       mode.current = 'focus';
@@ -852,10 +854,17 @@ function TelescopeCameraController({
         return;
       }
 
+      const dragMul =
+        typeof window !== 'undefined' &&
+        window.innerWidth <= TELESCOPE_MOBILE_MAX_WIDTH_PX
+          ? TELESCOPE_MOBILE_DRAG_SENSITIVITY_MUL
+          : 1;
+
       if (mode.current === 'region') {
-        // バーは画面水平（左=start、右=end）。右ドラッグで景色をつかんで左（start 側）へ進む。
+        // ?????????=start??=end?????????????????start ??????
         regionProgress.current = THREE.MathUtils.clamp(
-          regionProgress.current - dx * TELESCOPE_REGION_VIEW.dragSensitivity,
+          regionProgress.current -
+            dx * TELESCOPE_REGION_VIEW.dragSensitivity * dragMul,
           TELESCOPE_REGION_VIEW.progressMin,
           TELESCOPE_REGION_VIEW.progressMax,
         );
@@ -863,16 +872,16 @@ function TelescopeCameraController({
         return;
       }
 
-      // レイヤー4では画面中心（注視点）を支点に xy 平面内でカメラを回す
+      // ????4??????????????? xy ??????????
       if (mode.current === 'exploration') {
         explorationYaw.current +=
-          dx * TELESCOPE_EXPLORATION_VIEW.rotateSensitivity;
+          dx * TELESCOPE_EXPLORATION_VIEW.rotateSensitivity * dragMul;
         return;
       }
 
       if (mode.current === 'focus') {
-        const sens = TELESCOPE_FOCUS_VIEW.orbitSensitivity;
-        // ドラッグ方向とカメラ回転を直感に合わせる（左右・上下を反転）
+        const sens = TELESCOPE_FOCUS_VIEW.orbitSensitivity * dragMul;
+        // ??????????????????????????????
         const next = clampFocusOrbit(
           focusOrbitYaw.current + dx * sens,
           focusOrbitPitch.current + dy * sens,
@@ -883,8 +892,8 @@ function TelescopeCameraController({
       }
 
       const next = clampOrbitCircular(
-        targetTheta.current - dx * TELESCOPE_ORBIT_SENSITIVITY,
-        targetPhi.current - dy * TELESCOPE_ORBIT_SENSITIVITY,
+        targetTheta.current - dx * TELESCOPE_ORBIT_SENSITIVITY * dragMul,
+        targetPhi.current - dy * TELESCOPE_ORBIT_SENSITIVITY * dragMul,
         orbitCenterTheta.current,
         orbitCenterPhi.current,
         orbitRadiusMax.current,
@@ -915,7 +924,7 @@ function TelescopeCameraController({
     };
 
     const onPointerLeave = () => {
-      // ドラッグ中は capture で追従するため、非ドラッグ時のみ照準を解除
+      // ?????? capture ?????????????????????
       if (pointerId == null) {
         clearTelescopePointer();
       }
@@ -956,7 +965,7 @@ function TelescopeCameraController({
       if (animKind.current === 'free') {
         camera.position.lerpVectors(fromPos.current, toPos.current, eased);
         if (zoomInSubPhase.current === 'rotate') {
-          // 位置は保ったまま、選択感情注視＋原点が画面上側の姿勢へ回り込む。
+          // ????????????????????????????????
           camera.quaternion.slerpQuaternions(
             fromQuat.current,
             toQuat.current,
@@ -967,7 +976,7 @@ function TelescopeCameraController({
         } else {
           TMP_LOOK.lerpVectors(fromLook.current, toLook.current, eased);
           if (zoomInSubPhase.current === 'focusIn') {
-            // 接近しながら遷移 up → 最終の平面 up へ滑らかに接続
+            // ???????? up ? ????? up ???????
             TMP_UP.lerpVectors(
               focusScreenUp.current,
               FOCUS_UP,
@@ -986,7 +995,7 @@ function TelescopeCameraController({
             zoomPhaseRef.current === 'entering-exploration' ||
             zoomPhaseRef.current === 'leaving-exploration'
           ) {
-            // レイヤー3/4もレイヤー2と同じ平面法線 up を使う
+            // ????3/4?????2??????? up ???
             TMP_UP.copy(FOCUS_UP);
           } else if (zoomPhaseRef.current === 'zooming-out') {
             TMP_UP.lerpVectors(FOCUS_UP, SURVEY_UP, eased).normalize();
@@ -1037,7 +1046,7 @@ function TelescopeCameraController({
           zoomPhaseRef.current === 'zooming-in' &&
           zoomInSubPhase.current === 'focusIn'
         ) {
-          // 到着＝バー登場アニメーション開始。見上げは少し遅らせる。
+          // ????????????????????????????
           layer2ArrivalRef.current?.(true);
           beginTiltWait();
           return;
@@ -1165,7 +1174,7 @@ function TelescopeCameraController({
           lastExplorationSegmentIndex.current = segmentIndex;
         }
 
-        // プロット切替の追跡用（セグメント移動以外でも ID を同期）
+        // ?????????????????????? ID ????
         lastExplorationPlotId.current =
           explorationPlotIdRef.current ?? lastExplorationPlotId.current;
 
@@ -1206,7 +1215,7 @@ function TelescopeCameraController({
       if (explorationHud) {
         const hud = explorationHud.current;
         hud.yaw = explorationYaw.current;
-        // 選択中プロット点の画面位置（説明UIへの引き出し線用）
+        // ????????????????UI?????????
         const plotId = explorationPlotIdRef.current;
         const plot = plotId
           ? wordPlotsRef.current.find((row) => row.word_id === plotId)
@@ -1372,7 +1381,7 @@ function DetailVisibilityBridge({
   selectedDyadId: EmotionId | null;
   wordPlots: readonly UserPlotRow[];
   layer2SceneActive: boolean;
-  /** レイヤー2到着済み（バー登場アニメーション開始トリガー） */
+  /** ????2??????????????????????? */
   layer2Arrived: boolean;
   onViewFocus?: (focus: TelescopeViewFocus) => void;
   regionIndicator?: { current: TelescopeRegionIndicatorState };

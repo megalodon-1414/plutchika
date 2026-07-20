@@ -11,6 +11,10 @@ import type {
   TelescopeNearbyEmotionGlow,
   TelescopeViewFocus,
 } from './telescopeFocus';
+import {
+  TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH,
+  useTelescopeEmotionInfoMobile,
+} from './TelescopeEmotionInfoPanel';
 
 interface TelescopeEyepieceHudProps {
   focus: TelescopeViewFocus;
@@ -323,6 +327,9 @@ export function TelescopeGuideLabelHud({
 }) {
   const emotion = focus.nearest;
   const [detectionShown, setDetectionShown] = useState(false);
+  const isMobile = useTelescopeEmotionInfoMobile();
+  const layer2MobileInline =
+    isMobile && detailMode && !regionMode;
 
   useEffect(() => {
     if (!visible || !emotion) {
@@ -366,12 +373,17 @@ export function TelescopeGuideLabelHud({
         ? 1
         : 0.55;
 
-  const captionSize = 'clamp(0.62rem, 1.85vmin, 0.88rem)';
-  const primarySize =
-    detailMode && !regionMode
+  const captionSize = layer2MobileInline
+    ? 'clamp(0.58rem, 2.6vw, 0.78rem)'
+    : 'clamp(0.62rem, 1.85vmin, 0.88rem)';
+  const primarySize = layer2MobileInline
+    ? 'clamp(0.92rem, 4.2vw, 1.2rem)'
+    : detailMode && !regionMode
       ? 'clamp(0.88rem, 2.65vmin, 1.18rem)'
       : 'clamp(1.02rem, 3.55vmin, 1.58rem)';
-  const detectionSize = 'clamp(1.02rem, 3.55vmin, 1.58rem)';
+  const detectionSize = layer2MobileInline
+    ? 'clamp(0.92rem, 4.2vw, 1.2rem)'
+    : 'clamp(1.02rem, 3.55vmin, 1.58rem)';
 
   return (
     <div
@@ -379,16 +391,25 @@ export function TelescopeGuideLabelHud({
       style={{
         position: 'absolute',
         left: '50%',
-        top: 'clamp(48px, 10vmin, 132px)',
+        top: layer2MobileInline || isMobile
+          ? 'clamp(56px, 12vw, 78px)'
+          : 'clamp(48px, 10vmin, 132px)',
         transform: `translateX(calc(-50% + ${shiftX}))`,
         transition: 'transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 'clamp(3px, 0.9vmin, 6px)',
+        gap: layer2MobileInline
+          ? 'clamp(4px, 1.2vw, 8px)'
+          : 'clamp(3px, 0.9vmin, 6px)',
         opacity: 0.92,
         pointerEvents: 'none',
         zIndex: 2,
+        maxWidth: layer2MobileInline
+          ? `min(92vw, ${TELESCOPE_EMOTION_INFO_MOBILE_MAX_WIDTH}px)`
+          : undefined,
+        paddingInline: layer2MobileInline ? 8 : undefined,
+        boxSizing: 'border-box',
       }}
     >
       <span
@@ -402,50 +423,104 @@ export function TelescopeGuideLabelHud({
       >
         今の気持ちは
       </span>
-      <span
-        style={{
-          color: primaryColor,
-          fontSize: primarySize,
-          fontWeight: 750,
-          letterSpacing: '0.14em',
-          whiteSpace: 'nowrap',
-          minHeight: detailMode && !regionMode ? '1.2em' : '1.5em',
-          opacity: primaryOpacity,
-          transition: 'opacity 300ms ease, color 300ms ease',
-        }}
-      >
-        {primaryLabel || '\u00A0'}
-      </span>
-      {!regionMode ? (
-        <span
+      {layer2MobileInline ? (
+        <div
           style={{
-            marginTop: -2,
-            color: 'rgba(244, 236, 247, 0.72)',
-            fontSize: captionSize,
-            fontWeight: 550,
-            letterSpacing: '0.18em',
-            whiteSpace: 'nowrap',
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'baseline',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+            gap: 'clamp(4px, 1.5vw, 10px)',
+            maxWidth: '100%',
           }}
         >
-          {detailMode ? 'の中でも' : 'の方向'}
-        </span>
-      ) : null}
-      {detailMode && !regionMode ? (
-        <span
-          style={{
-            color: detectionColor,
-            fontSize: detectionSize,
-            fontWeight: 750,
-            letterSpacing: '0.14em',
-            whiteSpace: 'nowrap',
-            minHeight: '1.5em',
-            opacity: emotion && detectionShown ? 1 : 0.55,
-            transition: 'opacity 300ms ease, color 300ms ease',
-          }}
-        >
-          {detectionLabel || '\u00A0'}
-        </span>
-      ) : null}
+          <span
+            style={{
+              color: primaryColor,
+              fontSize: primarySize,
+              fontWeight: 750,
+              letterSpacing: '0.1em',
+              whiteSpace: 'nowrap',
+              opacity: primaryOpacity,
+              transition: 'opacity 300ms ease, color 300ms ease',
+            }}
+          >
+            {primaryLabel || '\u00A0'}
+          </span>
+          <span
+            style={{
+              color: 'rgba(244, 236, 247, 0.72)',
+              fontSize: captionSize,
+              fontWeight: 550,
+              letterSpacing: '0.12em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            の中でも
+          </span>
+          <span
+            style={{
+              color: detectionColor,
+              fontSize: detectionSize,
+              fontWeight: 750,
+              letterSpacing: '0.1em',
+              whiteSpace: 'nowrap',
+              opacity: emotion && detectionShown ? 1 : 0.55,
+              transition: 'opacity 300ms ease, color 300ms ease',
+            }}
+          >
+            {detectionLabel || '\u00A0'}
+          </span>
+        </div>
+      ) : (
+        <>
+          <span
+            style={{
+              color: primaryColor,
+              fontSize: primarySize,
+              fontWeight: 750,
+              letterSpacing: '0.14em',
+              whiteSpace: 'nowrap',
+              minHeight: detailMode && !regionMode ? '1.2em' : '1.5em',
+              opacity: primaryOpacity,
+              transition: 'opacity 300ms ease, color 300ms ease',
+            }}
+          >
+            {primaryLabel || '\u00A0'}
+          </span>
+          {!regionMode ? (
+            <span
+              style={{
+                marginTop: -2,
+                color: 'rgba(244, 236, 247, 0.72)',
+                fontSize: captionSize,
+                fontWeight: 550,
+                letterSpacing: '0.18em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {detailMode ? 'の中でも' : 'の方向'}
+            </span>
+          ) : null}
+          {detailMode && !regionMode ? (
+            <span
+              style={{
+                color: detectionColor,
+                fontSize: detectionSize,
+                fontWeight: 750,
+                letterSpacing: '0.14em',
+                whiteSpace: 'nowrap',
+                minHeight: '1.5em',
+                opacity: emotion && detectionShown ? 1 : 0.55,
+                transition: 'opacity 300ms ease, color 300ms ease',
+              }}
+            >
+              {detectionLabel || '\u00A0'}
+            </span>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

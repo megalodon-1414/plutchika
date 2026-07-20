@@ -10,10 +10,9 @@ import { Link } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
 import { getBasicEmotion, getEmotionById, isBasicEmotionId } from '../../data/emotions';
 import { ExplorationWordInfoPanel } from '../../components/ExplorationWordInfoPanel';
-import { ROUTES } from '../../routes/paths';
 import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
 import type { UserPlotRow } from '../../types/userPlot';
-import { complementaryHex } from '../../utils/emotionColor';
+import { complementaryHex, analogousEmotionColors } from '../../utils/emotionColor';
 import { getPrimaryEmotionColor } from '../../utils/emotionPlotBridge';
 import { mergeWithSeedPlots } from '../../utils/seedPlots';
 import type { TelescopeSettledPhase, TelescopeZoomPhase } from './constants';
@@ -53,8 +52,9 @@ import {
   getBasicEmotionDescription,
   getDyadEmotionDescription,
 } from '../../data/basicEmotionDescriptions';
-import { setTelescopePinHidden } from './telescopeAim';
-import { TelescopeEmotionInfoPanel } from './TelescopeEmotionInfoPanel';
+import { setTelescopeAimMode, setTelescopePinHidden } from './telescopeAim';
+import { TelescopeEmotionInfoPanel, useTelescopeEmotionInfoMobile } from './TelescopeEmotionInfoPanel';
+import { TelescopeCornerMenu } from './TelescopeCornerMenu';
 import { TelescopeSpaceCanvas } from './TelescopeSpaceCanvas';
 import { TelescopeZoomLadder, zoomLevelIndex } from './TelescopeZoomLadder';
 
@@ -543,6 +543,14 @@ export function TelescopeSpaceView() {
       tickerLabel: 'DETECTING',
     };
   }, [layer2HudMode, viewFocus.nearest]);
+  const emotionInfoMobile = useTelescopeEmotionInfoMobile();
+
+  // スマホは画面中央検知、デスクトップはカーソル検知
+  useEffect(() => {
+    setTelescopeAimMode(emotionInfoMobile ? 'center' : 'cursor');
+    return () => setTelescopeAimMode('cursor');
+  }, [emotionInfoMobile]);
+
   const [regionGuideLabel, setRegionGuideLabel] = useState<string | null>(null);
   const [regionGuideColor, setRegionGuideColor] = useState<string | null>(null);
 
@@ -711,6 +719,15 @@ export function TelescopeSpaceView() {
         : null,
     [selectedExplorationPlot],
   );
+  const landButtonGradient = useMemo(() => {
+    const colors = analogousEmotionColors(
+      selectedExploration?.color ?? '#9aa3c7',
+    );
+    return {
+      image: `linear-gradient(110deg, ${colors.join(', ')})`,
+      glow: colors[1],
+    };
+  }, [selectedExploration?.color]);
   const explorationPlotsBySegment = useMemo(() => {
     if (!selectedDyadId) {
       return new Map<number, string[]>();
@@ -883,18 +900,33 @@ export function TelescopeSpaceView() {
 
       {(basicEmotionInfo || dyadEmotionInfo) ? (
         <div
-          style={{
-            position: 'absolute',
-            top: 'max(64px, 8vh)',
-            left: 0,
-            bottom: 0,
-            zIndex: 3,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            gap: 14,
-            pointerEvents: 'none',
-          }}
+          style={
+            emotionInfoMobile
+              ? {
+                  position: 'absolute',
+                  left: 10,
+                  right: 10,
+                  bottom: 14,
+                  zIndex: 3,
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'stretch',
+                  gap: 8,
+                  pointerEvents: 'none',
+                }
+              : {
+                  position: 'absolute',
+                  top: 'max(64px, 8vh)',
+                  left: 0,
+                  bottom: 0,
+                  zIndex: 3,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: 14,
+                  pointerEvents: 'none',
+                }
+          }
         >
           {basicEmotionInfo ? (
             <TelescopeEmotionInfoPanel
@@ -906,6 +938,7 @@ export function TelescopeSpaceView() {
               tickerLabel={basicEmotionInfo.tickerLabel}
               heightRatio={0.42}
               positioned={false}
+              writingDirection={emotionInfoMobile ? 'horizontal' : 'vertical'}
             />
           ) : null}
           {dyadEmotionInfo ? (
@@ -918,6 +951,7 @@ export function TelescopeSpaceView() {
               tickerLabel={dyadEmotionInfo.tickerLabel}
               heightRatio={0.42}
               positioned={false}
+              writingDirection={emotionInfoMobile ? 'horizontal' : 'vertical'}
             />
           ) : null}
         </div>
@@ -1132,25 +1166,29 @@ export function TelescopeSpaceView() {
               pointerEvents: 'auto',
             }}
           >
+            <style>{`
+              @keyframes telescopeLandButtonGradient {
+                from { background-position: 0% 50%; }
+                to { background-position: 100% 50%; }
+              }
+            `}</style>
             <Link
               to={getEmotionWordPath(selectedExplorationPlot)}
               style={{
                 display: 'inline-block',
                 padding: '12px 26px',
-                border: `1px solid ${
-                  selectedExploration?.color ?? 'rgba(244, 236, 247, 0.35)'
-                }`,
+                border: 'none',
                 borderRadius: 8,
                 color: '#f4ecf7',
                 textDecoration: 'none',
                 fontSize: '0.88rem',
                 letterSpacing: '0.16em',
                 fontWeight: 700,
-                background: 'rgba(8, 10, 18, 0.58)',
-                backdropFilter: 'blur(10px)',
-                boxShadow: `0 0 0 1px ${
-                  selectedExploration?.color ?? 'rgba(244, 236, 247, 0.2)'
-                }55, 0 10px 28px rgba(0, 0, 0, 0.4)`,
+                backgroundImage: landButtonGradient.image,
+                backgroundSize: '300% 100%',
+                animation: 'telescopeLandButtonGradient 4.8s linear infinite',
+                boxShadow: `0 10px 28px rgba(0, 0, 0, 0.35), 0 0 22px ${landButtonGradient.glow}55`,
+                textShadow: '0 1px 8px rgba(0, 0, 0, 0.55)',
               }}
             >
               この感情に降り立つ
@@ -1159,86 +1197,77 @@ export function TelescopeSpaceView() {
         </>
       ) : null}
 
-      <div
-        style={{
-          position: 'absolute',
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: Math.round(210 * infoUiScale),
-          zIndex: 2,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          paddingRight: Math.round(58 * infoUiScale),
-          boxSizing: 'border-box',
-          background:
-            'linear-gradient(to left, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.56) 38%, rgba(0, 0, 0, 0) 100%)',
-          pointerEvents: 'none',
-        }}
-      >
+      {emotionInfoMobile ? (
         <div
           style={{
-            transform: `scale(${infoUiScale})`,
-            transformOrigin: 'center right',
-            transition: 'transform 180ms ease',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 4,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight:
+              'calc(max(12px, env(safe-area-inset-top, 0px)) + 40px)',
+            paddingTop: 'max(12px, env(safe-area-inset-top, 0px))',
+            paddingBottom: 8,
+            boxSizing: 'border-box',
+            background:
+              'linear-gradient(to bottom, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.28) 70%, rgba(0, 0, 0, 0) 100%)',
+            pointerEvents: 'none',
           }}
         >
-          <TelescopeZoomLadder
-            current={settled}
-            busy={busy}
-            onRetreatTo={handleRetreatTo}
-            selectedEmotion={selectedEmotion}
-            selectedDetailEmotion={selectedDyad}
-            selectedExplorationEmotion={selectedExploration}
-          />
+          <div style={{ pointerEvents: 'auto' }}>
+            <TelescopeZoomLadder
+              current={settled}
+              busy={busy}
+              onRetreatTo={handleRetreatTo}
+              orientation="horizontal"
+              showEmotionLabels={false}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: Math.round(210 * infoUiScale),
+            zIndex: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            paddingRight: Math.round(58 * infoUiScale),
+            boxSizing: 'border-box',
+            background:
+              'linear-gradient(to left, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.56) 38%, rgba(0, 0, 0, 0) 100%)',
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            style={{
+              transform: `scale(${infoUiScale})`,
+              transformOrigin: 'center right',
+              transition: 'transform 180ms ease',
+            }}
+          >
+            <TelescopeZoomLadder
+              current={settled}
+              busy={busy}
+              onRetreatTo={handleRetreatTo}
+              selectedEmotion={selectedEmotion}
+              selectedDetailEmotion={selectedDyad}
+              selectedExplorationEmotion={selectedExploration}
+              showEmotionLabels={false}
+            />
+          </div>
+        </div>
+      )}
 
-      <div
-        style={{
-          position: 'absolute',
-          top: 20,
-          right: 20,
-          zIndex: 2,
-          display: 'flex',
-          gap: 10,
-          pointerEvents: 'auto',
-        }}
-      >
-          <Link
-            to={ROUTES.home}
-            style={{
-              padding: '8px 12px',
-              border: '1px solid rgba(255,255,255,0.18)',
-              borderRadius: 8,
-              color: '#f4ecf7',
-              textDecoration: 'none',
-              fontSize: '0.78rem',
-              letterSpacing: '0.06em',
-              background: 'rgba(8,10,18,0.45)',
-              backdropFilter: 'blur(8px)',
-            }}
-          >
-            ホーム
-          </Link>
-          <Link
-            to={ROUTES.emotionMap}
-            style={{
-              padding: '8px 12px',
-              border: '1px solid rgba(255,255,255,0.18)',
-              borderRadius: 8,
-              color: '#f4ecf7',
-              textDecoration: 'none',
-              fontSize: '0.78rem',
-              letterSpacing: '0.06em',
-              background: 'rgba(8,10,18,0.45)',
-              backdropFilter: 'blur(8px)',
-            }}
-          >
-            既存MAP
-          </Link>
-      </div>
+      <TelescopeCornerMenu />
 
     </div>
   );
