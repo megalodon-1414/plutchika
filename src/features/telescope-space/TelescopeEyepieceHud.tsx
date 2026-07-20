@@ -300,8 +300,8 @@ export function TelescopeInnerTrackLabel({
 
 /**
  * 画面上部のガイドラベル（「今の気持ちは〜の方向／の中でも」）。
- * レンズ径・オーバースキャン・水平シフトの影響を受けないよう、
- * レンズ内ではなく画面座標に固定して表示する。
+ * レンズ径・オーバースキャンの影響は受けないよう画面座標に置くが、
+ * レイヤー4では視野の水平シフト（shiftX）に合わせて左右へ追従する。
  * レイヤー3では「の方向」を出さず、区画に応じた文言を可変部に表示する。
  */
 export function TelescopeGuideLabelHud({
@@ -312,11 +312,14 @@ export function TelescopeGuideLabelHud({
   selectedEmotion = null,
   regionGuideLabel = null,
   regionGuideColor = null,
+  shiftX = '0px',
 }: Omit<TelescopeEyepieceHudProps, 'regionMode'> & {
   regionMode?: boolean;
   /** レイヤー3: 現在区画のガイド文言（例「悲観よりの悲しみ」） */
   regionGuideLabel?: string | null;
   regionGuideColor?: string | null;
+  /** レンズ視野と同じ水平オフセット（レイヤー4で左へずらす） */
+  shiftX?: string;
 }) {
   const emotion = focus.nearest;
   const [detectionShown, setDetectionShown] = useState(false);
@@ -377,7 +380,8 @@ export function TelescopeGuideLabelHud({
         position: 'absolute',
         left: '50%',
         top: 'clamp(48px, 10vmin, 132px)',
-        transform: 'translateX(-50%)',
+        transform: `translateX(calc(-50% + ${shiftX}))`,
+        transition: 'transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',

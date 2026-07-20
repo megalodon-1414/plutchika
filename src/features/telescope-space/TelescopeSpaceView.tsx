@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { Link } from 'react-router-dom';
 import type { BasicEmotionId, EmotionId } from '../../data/emotions';
-import { getBasicEmotion, getEmotionById } from '../../data/emotions';
+import { getBasicEmotion, getEmotionById, isBasicEmotionId } from '../../data/emotions';
 import { ExplorationWordInfoPanel } from '../../components/ExplorationWordInfoPanel';
 import { ROUTES } from '../../routes/paths';
 import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
@@ -48,7 +48,13 @@ import {
   type TelescopeExplorationHudState,
 } from './layer4Exploration';
 import { plotColorFromRow } from '../../utils/plotFromUserPlot';
+import { getEmotionWordPath } from '../../utils/emotionWordSlug';
+import {
+  getBasicEmotionDescription,
+  getDyadEmotionDescription,
+} from '../../data/basicEmotionDescriptions';
 import { setTelescopePinHidden } from './telescopeAim';
+import { TelescopeEmotionInfoPanel } from './TelescopeEmotionInfoPanel';
 import { TelescopeSpaceCanvas } from './TelescopeSpaceCanvas';
 import { TelescopeZoomLadder, zoomLevelIndex } from './TelescopeZoomLadder';
 
@@ -143,21 +149,6 @@ function eyepieceOverscanForPhase(phase: TelescopeZoomPhase): number {
       return 1.3;
     default:
       return 1;
-  }
-}
-
-function layerLabel(settled: TelescopeSettledPhase): string {
-  switch (settled) {
-    case 'far':
-      return 'LAYER 00 · 遠景';
-    case 'wide':
-      return 'LAYER 01 · 銀河 8+24';
-    case 'detail':
-      return 'LAYER 02 · 感情語プロット';
-    case 'region':
-      return 'LAYER 03 · 感情領域';
-    case 'exploration':
-      return 'LAYER 04 · 感情点探索';
   }
 }
 
@@ -354,7 +345,6 @@ export function TelescopeSpaceView() {
 
   const busy = isBusyPhase(zoomPhase);
   const settled = settledFromPhase(zoomPhase);
-  const layer = layerLabel(settled);
   const aperture = useMemo(() => apertureForPhase(zoomPhase), [zoomPhase]);
   const eyepieceOverscan = useMemo(
     () => eyepieceOverscanForPhase(zoomPhase),
@@ -504,6 +494,55 @@ export function TelescopeSpaceView() {
   const detailHudMode = settled === 'detail' && layer2HudActive;
   const regionHudMode = settled === 'region';
   const explorationHudMode = settled === 'exploration';
+  const layer1HudMode = settled === 'wide';
+  const layer2HudMode = settled === 'detail';
+  /** レイヤー1検知 / レイヤー2へ持ち越した選択中の基本感情 */
+  const basicEmotionInfo = useMemo(() => {
+    if (layer1HudMode) {
+      const nearest = viewFocus.nearest;
+      if (!nearest || !isBasicEmotionId(nearest.id as BasicEmotionId)) {
+        return null;
+      }
+      return {
+        id: nearest.id as BasicEmotionId,
+        label: nearest.label,
+        color: nearest.color,
+        description: getBasicEmotionDescription(nearest.id as BasicEmotionId),
+        sectionLabel: '検知中',
+        tickerLabel: 'DETECTING',
+      };
+    }
+    if (layer2HudMode && focusBasicId) {
+      const emotion = getBasicEmotion(focusBasicId);
+      return {
+        id: focusBasicId,
+        label: emotion.label,
+        color: emotion.color,
+        description: getBasicEmotionDescription(focusBasicId),
+        sectionLabel: '検知中',
+        tickerLabel: 'DETECTING',
+      };
+    }
+    return null;
+  }, [layer1HudMode, layer2HudMode, viewFocus.nearest, focusBasicId]);
+  /** レイヤー2で検知中の合成感情（24） */
+  const dyadEmotionInfo = useMemo(() => {
+    if (!layer2HudMode) {
+      return null;
+    }
+    const nearest = viewFocus.nearest;
+    if (!nearest || !nearest.id.startsWith('dyad-')) {
+      return null;
+    }
+    return {
+      id: nearest.id as EmotionId,
+      label: nearest.label,
+      color: nearest.color,
+      description: getDyadEmotionDescription(nearest.id as EmotionId),
+      sectionLabel: '検知中',
+      tickerLabel: 'DETECTING',
+    };
+  }, [layer2HudMode, viewFocus.nearest]);
   const [regionGuideLabel, setRegionGuideLabel] = useState<string | null>(null);
   const [regionGuideColor, setRegionGuideColor] = useState<string | null>(null);
 
@@ -830,7 +869,7 @@ export function TelescopeSpaceView() {
         />
       </TelescopeEyepiece>
 
-      {/* ガイドラベル — レンズ径や水平シフトに影響されない画面固定HUD */}
+      {/* ガイドラベル — レンズ径には影響されないが、レイヤー4では視野と同じ水平シフトを追従 */}
       <TelescopeGuideLabelHud
         focus={viewFocus}
         visible={showHud}
@@ -839,7 +878,50 @@ export function TelescopeSpaceView() {
         selectedEmotion={selectedEmotion}
         regionGuideLabel={regionGuideLabel}
         regionGuideColor={regionGuideColor}
+        shiftX={eyepieceShiftX}
       />
+
+      {(basicEmotionInfo || dyadEmotionInfo) ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'max(64px, 8vh)',
+            left: 0,
+            bottom: 0,
+            zIndex: 3,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 14,
+            pointerEvents: 'none',
+          }}
+        >
+          {basicEmotionInfo ? (
+            <TelescopeEmotionInfoPanel
+              panelKey={`basic-${basicEmotionInfo.id}`}
+              label={basicEmotionInfo.label}
+              color={basicEmotionInfo.color}
+              description={basicEmotionInfo.description}
+              sectionLabel={basicEmotionInfo.sectionLabel}
+              tickerLabel={basicEmotionInfo.tickerLabel}
+              heightRatio={0.42}
+              positioned={false}
+            />
+          ) : null}
+          {dyadEmotionInfo ? (
+            <TelescopeEmotionInfoPanel
+              panelKey={`dyad-${dyadEmotionInfo.id}`}
+              label={dyadEmotionInfo.label}
+              color={dyadEmotionInfo.color}
+              description={dyadEmotionInfo.description}
+              sectionLabel={dyadEmotionInfo.sectionLabel}
+              tickerLabel={dyadEmotionInfo.tickerLabel}
+              heightRatio={0.42}
+              positioned={false}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {/* レイヤー4 セグメント移動矢印 — 最前面。レンズと同じ座標系を再現する */}
       {explorationHudMode ? (
@@ -1039,6 +1121,41 @@ export function TelescopeSpaceView() {
             rightOffset={140}
             panelRef={explorationPanelRef}
           />
+          <div
+            style={{
+              position: 'absolute',
+              left: '50%',
+              bottom: 56,
+              transform: `translateX(calc(-50% + ${eyepieceShiftX}))`,
+              transition: 'transform 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              zIndex: 3,
+              pointerEvents: 'auto',
+            }}
+          >
+            <Link
+              to={getEmotionWordPath(selectedExplorationPlot)}
+              style={{
+                display: 'inline-block',
+                padding: '12px 26px',
+                border: `1px solid ${
+                  selectedExploration?.color ?? 'rgba(244, 236, 247, 0.35)'
+                }`,
+                borderRadius: 8,
+                color: '#f4ecf7',
+                textDecoration: 'none',
+                fontSize: '0.88rem',
+                letterSpacing: '0.16em',
+                fontWeight: 700,
+                background: 'rgba(8, 10, 18, 0.58)',
+                backdropFilter: 'blur(10px)',
+                boxShadow: `0 0 0 1px ${
+                  selectedExploration?.color ?? 'rgba(244, 236, 247, 0.2)'
+                }55, 0 10px 28px rgba(0, 0, 0, 0.4)`,
+              }}
+            >
+              この感情に降り立つ
+            </Link>
+          </div>
         </>
       ) : null}
 
@@ -1123,38 +1240,6 @@ export function TelescopeSpaceView() {
           </Link>
       </div>
 
-      <div
-        style={{
-          position: 'absolute',
-          left: '50%',
-          bottom: 28,
-          transform: 'translateX(-50%)',
-          zIndex: 2,
-          pointerEvents: 'none',
-        }}
-      >
-        <p
-          style={{
-            margin: 0,
-            fontSize: '0.72rem',
-            letterSpacing: '0.12em',
-            opacity: 0.5,
-            textAlign: 'center',
-          }}
-        >
-          {busy ? '調整中…' : layer}
-          {!busy && (settled === 'far' || settled === 'wide')
-            ? '  ·  円内クリックで近づく / 右の点で戻る'
-            : null}
-          {!busy && settled === 'detail' ? '  ·  右の点で戻る / ドラッグで見回す' : null}
-          {!busy && settled === 'region'
-            ? '  ·  ハイライト区画をクリックで探索へ / ドラッグで移動 / 右の点で戻る'
-            : null}
-          {!busy && settled === 'exploration'
-            ? '  ·  近い感情点をクリックして移動 / 右の点で戻る'
-            : null}
-        </p>
-      </div>
     </div>
   );
 }
