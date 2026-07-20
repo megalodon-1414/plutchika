@@ -1,4 +1,5 @@
 import { SITE_NAME } from '../../../constants/site';
+import plutchikaQrUrl from '../../../../plutchika.svg';
 import { IntroFlowerLogo } from './IntroFlowerLogo';
 
 interface IntroLogoScreenProps {
@@ -14,6 +15,14 @@ export function IntroLogoScreen({ atLogoStep }: IntroLogoScreenProps) {
       <div className={`home-intro-logo__text ${atLogoStep ? '' : 'home-intro-logo__text--leaving'}`}>
         <p className="home-intro-logo__mark">{SITE_NAME}</p>
       </div>
+      <img
+        src={plutchikaQrUrl}
+        alt=""
+        className={`home-intro-logo__qr ${atLogoStep ? '' : 'home-intro-logo__qr--leaving'}`}
+        width={72}
+        height={72}
+        decoding="async"
+      />
     </div>
   );
 }
