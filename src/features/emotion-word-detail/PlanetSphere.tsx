@@ -1,7 +1,7 @@
 /**
  * 単語ページの惑星。Moon_2K.obj（public/models/Moon_2K.obj）を読み込み、
  * ホームの PlanetGlobe と同じトゥーンマテリアル＋クレーターテクスチャで表示する。
- * 地平線が画面上端から80%（CSSの --surface-bottom: 20% と対）に来るよう配置する。
+ * 地平線位置は wordPlanetHorizonRatio() で決め、CSSの --surface-bottom と対になるよう揃える。
  */
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import { Suspense, useMemo, useRef, useState, type MutableRefObject } from 'react';
@@ -23,11 +23,21 @@ function planetPalette(accent: string): { base: string; crater: string } {
   return { base: `#${base.getHexString()}`, crater: `#${crater.getHexString()}` };
 }
 
-/** 画面上端から地平線（惑星の頂点）までの比率。CSS側の --surface-bottom と揃えること。 */
-export const WORD_PLANET_HORIZON_RATIO = 0.8;
+/**
+ * 画面上端から地平線（惑星の頂点）までの比率。
+ * スマホのみ少し上げて星の下側まで見せ、PCは従来どおり（0.8＝画面下20%）。
+ * CSS側の --surface-bottom（= 1 - この値）と揃えること。
+ */
+export function wordPlanetHorizonRatio(viewportWidth: number): number {
+  return viewportWidth <= 640 ? 0.72 : 0.8;
+}
 
 /** 惑星の半径(px)。ジェムの傾き計算でも使う。 */
 export function wordPlanetRadius(viewportWidth: number): number {
+  // スマホは画面に占める面積を大きくするため、係数をデスクトップより強める
+  if (viewportWidth <= 640) {
+    return Math.min(viewportWidth * 1.72, 1100);
+  }
   return Math.min(viewportWidth * 1.24, 1800);
 }
 
@@ -98,7 +108,7 @@ function MoonMesh({ accent, rotationRad, pitchRad }: PlanetMeshProps) {
   }, [obj, texture]);
 
   const radius = wordPlanetRadius(size.width);
-  const apexY = size.height / 2 - WORD_PLANET_HORIZON_RATIO * size.height;
+  const apexY = size.height / 2 - wordPlanetHorizonRatio(size.width) * size.height;
   const centerY = apexY - radius;
 
   useFrame((_, delta) => {
@@ -340,7 +350,7 @@ function SurfaceFlags({
 function usePlanetCenterY(): number {
   const { size } = useThree();
   const radius = wordPlanetRadius(size.width);
-  const apexY = size.height / 2 - WORD_PLANET_HORIZON_RATIO * size.height;
+  const apexY = size.height / 2 - wordPlanetHorizonRatio(size.width) * size.height;
   return apexY - radius;
 }
 
@@ -410,7 +420,8 @@ export function PlanetSphere({
   );
 }
 
-/** 旗専用レイヤー。ロケット(z=3)より手前(z=4)に描き、重なり時は旗を優先する。
+/** 旗専用レイヤー。ロケット(z=3)より手前・人物(z=5)より奥(z=4)に描く。
+ *  星の回転で旗が人の位置を通るときは人が手前に見える。
  *  めり込んだポールと星の裏へ回った旗は、同グループの深度球で隠す */
 export function PlantedFlagsLayer({
   accent = '#8b9dc1',

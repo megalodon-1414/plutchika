@@ -169,16 +169,20 @@ export function HomeIntroView() {
           {isBoardingStep && boardingStatus === 'launching' && <div className="home-intro-launch-dim" />}
 
           <IntroWalker stepping={isAnimating} boarding={boardingStatus !== 'idle'} revealed={walkerRevealed} />
-          {isBoardingStep && boardingStatus !== 'launching' && (
-            <div className="home-intro-board-cta">
-              <button
-                type="button"
-                className="home-intro-board-cta__button"
-                onClick={handleBoardClick}
-                disabled={boardingStatus !== 'idle'}
-              >
-                感情Mapへ
-              </button>
+          {isBoardingStep && boardingStatus === 'idle' && (
+            <div className="home-intro-board-heading">
+              <p className="home-intro-board-title">
+                さあ、あなたの感情を
+                <br />
+                探しにいきましょう
+              </p>
+              <div className="home-intro-board-scroll-hint" aria-hidden="true">
+                <span className="home-intro-board-scroll-hint__chevrons">
+                  <span className="home-intro-board-scroll-hint__chevron" />
+                  <span className="home-intro-board-scroll-hint__chevron" />
+                </span>
+                <span className="home-intro-board-scroll-hint__label">Scroll to find your mind！</span>
+              </div>
             </div>
           )}
           <NavigationIndicator
