@@ -1983,12 +1983,15 @@ export function WordLandingExperience({
             style={{
               margin: '9px 0 0',
               fontSize: surface.isMobile
-                ? 'clamp(2.85rem, 12vw, 3.6rem)'
+                ? (activePanel === 'meaning' || closingPanel === 'meaning')
+                  ? 'clamp(1.65rem, 7.5vw, 2.1rem)'
+                  : 'clamp(2.85rem, 12vw, 3.6rem)'
                 : 'clamp(2.2rem, 7vw, 4.2rem)',
               fontWeight: 620,
               letterSpacing: '0.12em',
               color: uiTheme.textPrimary,
               textShadow: `0 0 24px ${uiTheme.accentGlow}`,
+              transition: 'font-size .28s ease',
             }}
           >
             {plot.word_id}

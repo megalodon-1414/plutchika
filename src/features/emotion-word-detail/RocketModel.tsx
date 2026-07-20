@@ -201,7 +201,8 @@ function RocketScene({
       if (reducedMotion) {
         pivot.scale.setScalar(worldHeight * 8);
         pivot.position.set(0, 0, CAMERA_DIST - worldHeight * 4);
-        pivot.rotation.set(-Math.PI / 2, 0, 0);
+        // 機首（+Y）をカメラ（+Z）へ向ける
+        pivot.rotation.set(Math.PI / 2, 0, 0);
         setFlame(0, 0);
         return;
       }
@@ -224,7 +225,7 @@ function RocketScene({
         // 発射②：画面外で機首をカメラへ向ける（見えない）
         pivot.scale.setScalar(worldHeight * 0.001);
         pivot.position.set(0, size.height * 0.2 * unitsPerPixel, 0);
-        pivot.rotation.set(-Math.PI / 2, 0, 0);
+        pivot.rotation.set(Math.PI / 2, 0, 0);
         setFlame(0, 0);
         return;
       }
@@ -242,7 +243,7 @@ function RocketScene({
         THREE.MathUtils.lerp(size.height * 0.15 * unitsPerPixel, 0, grow),
         z,
       );
-      pivot.rotation.set(-Math.PI / 2, 0, 0);
+      pivot.rotation.set(Math.PI / 2, 0, 0);
       setFlame(0.55 * (1 - grow), 1.1);
       return;
     }
