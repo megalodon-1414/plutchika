@@ -12,7 +12,7 @@ import { getBasicEmotion, getEmotionById, isBasicEmotionId } from '../../data/em
 import { ExplorationWordInfoPanel, explorationUiSlideAnimation, EXPLORATION_UI_TRANSITION_KEYFRAMES } from '../../components/ExplorationWordInfoPanel';
 import { fetchEmotionWordsAsPlots } from '../../services/emotionWords';
 import type { UserPlotRow } from '../../types/userPlot';
-import { complementaryHex, analogousEmotionColors } from '../../utils/emotionColor';
+import { complementaryHex, landButtonFlowGradient } from '../../utils/emotionColor';
 import { getPrimaryEmotionColor } from '../../utils/emotionPlotBridge';
 import { mergeWithSeedPlots } from '../../utils/seedPlots';
 import type { TelescopeSettledPhase, TelescopeZoomPhase } from './constants';
@@ -827,15 +827,10 @@ export function TelescopeSpaceView() {
         : null,
     [selectedExplorationPlot],
   );
-  const landButtonGradient = useMemo(() => {
-    const colors = analogousEmotionColors(
-      selectedExploration?.color ?? '#9aa3c7',
-    );
-    return {
-      image: `linear-gradient(110deg, ${colors.join(', ')})`,
-      glow: colors[1],
-    };
-  }, [selectedExploration?.color]);
+  const landButtonGradient = useMemo(
+    () => landButtonFlowGradient(selectedExploration?.color ?? '#9aa3c7'),
+    [selectedExploration?.color],
+  );
   const explorationPlotsBySegment = useMemo(() => {
     if (!selectedDyadId) {
       return new Map<number, string[]>();
@@ -1305,9 +1300,10 @@ export function TelescopeSpaceView() {
                     fontWeight: 700,
                     whiteSpace: 'nowrap',
                     backgroundImage: landButtonGradient.image,
-                    backgroundSize: '300% 100%',
+                    backgroundSize: '200% 100%',
+                    backgroundRepeat: 'no-repeat',
                     animation:
-                      'telescopeLandButtonGradient 4.8s linear infinite',
+                      'telescopeLandButtonGradient 9.5s linear infinite',
                     boxShadow: `0 10px 28px rgba(0, 0, 0, 0.35), 0 0 22px ${landButtonGradient.glow}55`,
                     textShadow: '0 1px 8px rgba(0, 0, 0, 0.55)',
                   }}
@@ -1371,9 +1367,10 @@ export function TelescopeSpaceView() {
                     fontWeight: 700,
                     whiteSpace: 'nowrap',
                     backgroundImage: landButtonGradient.image,
-                    backgroundSize: '300% 100%',
+                    backgroundSize: '200% 100%',
+                    backgroundRepeat: 'no-repeat',
                     animation:
-                      'telescopeLandButtonGradient 4.8s linear infinite',
+                      'telescopeLandButtonGradient 9.5s linear infinite',
                     boxShadow: `0 10px 28px rgba(0, 0, 0, 0.35), 0 0 22px ${landButtonGradient.glow}55`,
                     textShadow: '0 1px 8px rgba(0, 0, 0, 0.55)',
                   }}
