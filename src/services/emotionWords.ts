@@ -1,4 +1,3 @@
-import { supabase } from '../lib/supabase';
 import type { EmotionId } from '../data/emotions';
 import type { UserPlotRow } from '../types/userPlot';
 import { normalizeUserPlotRow } from '../utils/emotionPlotBridge';
@@ -8,10 +7,10 @@ import {
   registerSupabaseEmotionLabels,
   resolveSecondaryEmotionId,
   secondaryValueToPlotIntensity,
-  type SupabaseEmotionRow,
   type SupabaseEmotionWordRow,
   type SupabaseWordTypeRow,
 } from '../utils/emotionWordsBridge';
+import { EMOTION_WORD_DATASET } from './emotionWordDataset';
 
 function emotionWordToPlot(
   row: SupabaseEmotionWordRow,
@@ -48,32 +47,8 @@ function emotionWordToPlot(
   });
 }
 
-export async function fetchEmotionWordsAsPlots(): Promise<UserPlotRow[]> {
-  const [emotionsResult, wordTypesResult, wordsResult] = await Promise.all([
-    supabase.from('emotions').select('id,name,tier,combo').order('id'),
-    supabase.from('word_types').select('id,name').order('id'),
-    supabase
-      .from('emotion_words')
-      .select(
-        'id,word,ruby,meaning,usage_example,primary_emotion_id,secondary_emotion_id,secondary_value,word_type_id',
-      )
-      .order('id')
-      .limit(2000),
-  ]);
-
-  if (emotionsResult.error) {
-    throw new Error(emotionsResult.error.message);
-  }
-  if (wordTypesResult.error) {
-    throw new Error(wordTypesResult.error.message);
-  }
-  if (wordsResult.error) {
-    throw new Error(wordsResult.error.message);
-  }
-
-  const emotions = (emotionsResult.data ?? []) as SupabaseEmotionRow[];
-  const wordTypes = (wordTypesResult.data ?? []) as SupabaseWordTypeRow[];
-  const words = (wordsResult.data ?? []) as SupabaseEmotionWordRow[];
+export function plotsFromEmotionWordDataset(): UserPlotRow[] {
+  const { emotions, wordTypes, words } = EMOTION_WORD_DATASET;
 
   registerSupabaseEmotionLabels(emotions);
   const emotionIdBySupabaseId = buildEmotionIdBySupabaseId(emotions);
@@ -82,4 +57,9 @@ export async function fetchEmotionWordsAsPlots(): Promise<UserPlotRow[]> {
   return words
     .map((row) => emotionWordToPlot(row, emotionIdBySupabaseId, wordTypes, emotionNameById))
     .filter((row): row is UserPlotRow => row !== null);
+}
+
+/** 感情語マスター（`src/data/emotionWords/*.json`）からプロット一覧を取得 */
+export async function fetchEmotionWordsAsPlots(): Promise<UserPlotRow[]> {
+  return plotsFromEmotionWordDataset();
 }

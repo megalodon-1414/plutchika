@@ -6,23 +6,17 @@ import {
   buildEmotionIdBySupabaseId,
   buildSupabaseIdByEmotionId,
   registerSupabaseEmotionLabels,
-  type SupabaseEmotionRow,
 } from '../utils/emotionWordsBridge';
+import { EMOTION_WORD_DATASET } from './emotionWordDataset';
 
 export interface EmotionLookup {
-  emotions: SupabaseEmotionRow[];
+  emotions: typeof EMOTION_WORD_DATASET.emotions;
   emotionIdBySupabaseId: Map<number, EmotionId>;
   supabaseIdByEmotionId: Map<EmotionId, number>;
 }
 
 export async function fetchEmotionLookup(): Promise<EmotionLookup> {
-  const { data, error } = await supabase.from('emotions').select('id,name,tier,combo').order('id');
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const emotions = (data ?? []) as SupabaseEmotionRow[];
+  const emotions = EMOTION_WORD_DATASET.emotions;
   registerSupabaseEmotionLabels(emotions);
 
   return {

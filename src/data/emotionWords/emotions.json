@@ -1,0 +1,194 @@
+[
+  {
+    "id": 1,
+    "name": "喜び",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 2,
+    "name": "信頼",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 3,
+    "name": "恐れ",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 4,
+    "name": "驚き",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 5,
+    "name": "悲しみ",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 6,
+    "name": "嫌悪",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 7,
+    "name": "怒り",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 8,
+    "name": "期待",
+    "tier": "basic8",
+    "combo": null
+  },
+  {
+    "id": 9,
+    "name": "愛",
+    "tier": "primary",
+    "combo": "喜び＋信頼"
+  },
+  {
+    "id": 10,
+    "name": "服従",
+    "tier": "primary",
+    "combo": "信頼＋恐れ"
+  },
+  {
+    "id": 11,
+    "name": "畏敬",
+    "tier": "primary",
+    "combo": "恐れ＋驚き"
+  },
+  {
+    "id": 12,
+    "name": "失望",
+    "tier": "primary",
+    "combo": "驚き＋悲しみ"
+  },
+  {
+    "id": 13,
+    "name": "自責",
+    "tier": "primary",
+    "combo": "悲しみ＋嫌悪"
+  },
+  {
+    "id": 14,
+    "name": "軽蔑",
+    "tier": "primary",
+    "combo": "嫌悪＋怒り"
+  },
+  {
+    "id": 15,
+    "name": "積極性",
+    "tier": "primary",
+    "combo": "怒り＋期待"
+  },
+  {
+    "id": 16,
+    "name": "楽観",
+    "tier": "primary",
+    "combo": "期待＋喜び"
+  },
+  {
+    "id": 17,
+    "name": "罪悪感",
+    "tier": "secondary",
+    "combo": "喜び＋恐れ"
+  },
+  {
+    "id": 18,
+    "name": "絶望",
+    "tier": "secondary",
+    "combo": "恐れ＋悲しみ"
+  },
+  {
+    "id": 19,
+    "name": "羨望",
+    "tier": "secondary",
+    "combo": "悲しみ＋怒り"
+  },
+  {
+    "id": 20,
+    "name": "誇り",
+    "tier": "secondary",
+    "combo": "怒り＋喜び"
+  },
+  {
+    "id": 21,
+    "name": "好奇心",
+    "tier": "secondary",
+    "combo": "信頼＋驚き"
+  },
+  {
+    "id": 22,
+    "name": "不信",
+    "tier": "secondary",
+    "combo": "驚き＋嫌悪"
+  },
+  {
+    "id": 23,
+    "name": "冷笑",
+    "tier": "secondary",
+    "combo": "嫌悪＋期待"
+  },
+  {
+    "id": 24,
+    "name": "希望",
+    "tier": "secondary",
+    "combo": "期待＋信頼"
+  },
+  {
+    "id": 25,
+    "name": "歓喜",
+    "tier": "tertiary",
+    "combo": "喜び＋驚き"
+  },
+  {
+    "id": 26,
+    "name": "病的状態",
+    "tier": "tertiary",
+    "combo": "喜び＋嫌悪"
+  },
+  {
+    "id": 27,
+    "name": "恥",
+    "tier": "tertiary",
+    "combo": "恐れ＋嫌悪"
+  },
+  {
+    "id": 28,
+    "name": "不安",
+    "tier": "tertiary",
+    "combo": "恐れ＋期待"
+  },
+  {
+    "id": 29,
+    "name": "感傷",
+    "tier": "tertiary",
+    "combo": "悲しみ＋信頼"
+  },
+  {
+    "id": 30,
+    "name": "悲観",
+    "tier": "tertiary",
+    "combo": "悲しみ＋期待"
+  },
+  {
+    "id": 31,
+    "name": "優位",
+    "tier": "tertiary",
+    "combo": "怒り＋信頼"
+  },
+  {
+    "id": 32,
+    "name": "憤慨",
+    "tier": "tertiary",
+    "combo": "怒り＋驚き"
+  }
+]
