@@ -327,6 +327,8 @@ interface LinkedBodyTextProps {
   onNavigate?: (path: string) => void;
   /** 本文の直後・同じブロック内に置く要素（スマホ花びらアイコンなど） */
   afterBody?: ReactNode;
+  /** 次ページ誘導矢印を本文カラム内で右端に置く（mirrored パネル向け） */
+  scrollHintAlignEnd?: boolean;
 }
 
 /**
@@ -356,6 +358,7 @@ function LinkedBodyText({
   opacity,
   onNavigate,
   afterBody,
+  scrollHintAlignEnd = false,
 }: LinkedBodyTextProps) {
   return (
     <Html position={[x, startY, 0]} transform={false} style={{ pointerEvents: 'none' }}>
@@ -403,7 +406,13 @@ function LinkedBodyText({
             ),
           )}
         </div>
-        <div className="home-intro-body-footer">
+        <div
+          className={
+            scrollHintAlignEnd
+              ? 'home-intro-body-footer home-intro-body-footer--hint-end'
+              : 'home-intro-body-footer'
+          }
+        >
           <span className="home-intro-body-scroll-hint" aria-hidden />
           {afterBody ? (
             <div className="home-intro-body-footer__trailing">{afterBody}</div>
@@ -729,6 +738,7 @@ function SimplePanelLayout({
         anchorX={bodyAnchorX}
         textAlign={bodyAnchorX}
         opacity={opacity}
+        scrollHintAlignEnd={mirrored}
       />
     </>
   );

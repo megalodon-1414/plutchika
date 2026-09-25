@@ -170,6 +170,10 @@
   margin-left: auto;
 }
 
+.home-intro-body-footer--hint-end {
+  justify-content: flex-end;
+}
+
 .home-intro-body-scroll-hint {
   display: block;
   flex: none;
@@ -535,6 +539,7 @@
   height: 286px;
   z-index: 4;
   pointer-events: none;
+  overflow: visible;
   /* 縦線と全ドットの中心位置（右端からのオフセット）。ドット・PREVIOUSの円弧はすべてこの値を基準に「中心」を揃える。 */
   --nav-indicator-axis: 13px;
 }
@@ -649,6 +654,7 @@
   right: var(--nav-indicator-axis);
   transform: translate(50%, -50%);
   pointer-events: none;
+  overflow: visible;
 }
 
 /* 文字の後ろ側にぴったり重なる、細い円のガイドライン。円自体は対称形なので回転させる必要はない。 */

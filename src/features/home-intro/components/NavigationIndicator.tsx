@@ -21,9 +21,10 @@ const PREVIOUS_TEXT_RADIUS = 19.5;
 /** 円（ガイドライン）の半径。文字のベースラインより一回り小さくして、文字の後ろ側にぴったり重なるようにする。 */
 const PREVIOUS_RING_RADIUS = 16.9;
 /** SVG描画領域の余白（文字の昇り／下がり分の描画スペース）。 */
-const PREVIOUS_SVG_PADDING = 13;
+/** 文字のはみ出し（P/S 等）を viewBox 内に収める余白。 */
+const PREVIOUS_SVG_PADDING = 18;
 /** 文字を配置する弧の角度範囲・中心角（0deg=右方向、時計回りが正）。円の上側に弧を置く。 */
-const PREVIOUS_ARC_DEGREES = 140;
+const PREVIOUS_ARC_DEGREES = 178;
 const PREVIOUS_ARC_CENTER_DEGREES = 270;
 const PREVIOUS_PATH_ID = 'nav-indicator-previous-path';
 
@@ -56,7 +57,12 @@ function PreviousOrbitLabel({ topPercent }: { topPercent: number }) {
       style={{ top: `${topPercent}%`, width: size, height: size }}
       aria-hidden
     >
-      <svg viewBox={`${-half} ${-half} ${size} ${size}`} width={size} height={size}>
+      <svg
+        viewBox={`${-half} ${-half} ${size} ${size}`}
+        width={size}
+        height={size}
+        overflow="visible"
+      >
         <circle className="nav-indicator__previous-ring" r={PREVIOUS_RING_RADIUS} cx={0} cy={0} />
         <g className="nav-indicator__previous-spin">
           <path id={PREVIOUS_PATH_ID} d={`M ${x1} ${y1} A ${PREVIOUS_TEXT_RADIUS} ${PREVIOUS_TEXT_RADIUS} 0 0 1 ${x2} ${y2}`} fill="none" />

@@ -25,10 +25,10 @@ const LEVEL_DOT_SIZE_HORIZONTAL = 11;
 const LEVEL_GAP = 48;
 const LEVEL_GAP_HORIZONTAL = 20;
 const PREVIOUS_LETTERS = [...'PREVIOUS'];
-const PREVIOUS_LETTER_STEP_DEG = 22;
-const PREVIOUS_LETTER_STEP_DEG_HORIZONTAL = 26;
-const PREVIOUS_ORBIT_RADIUS = 22;
-const PREVIOUS_ORBIT_RADIUS_HORIZONTAL = 13;
+const PREVIOUS_LETTER_STEP_DEG = 20;
+const PREVIOUS_LETTER_STEP_DEG_HORIZONTAL = 22;
+const PREVIOUS_ORBIT_RADIUS = 24;
+const PREVIOUS_ORBIT_RADIUS_HORIZONTAL = 17;
 const PREVIOUS_LETTER_SIZE = '0.48rem';
 const PREVIOUS_LETTER_SIZE_HORIZONTAL = '0.3rem';
 
@@ -72,8 +72,11 @@ function PreviousOrbitLabel({ compact = false }: { compact?: boolean }) {
         position: 'absolute',
         left: '50%',
         top: '50%',
-        width: 0,
-        height: 0,
+        width: ringSize + 12,
+        height: ringSize + 12,
+        marginLeft: -(ringSize + 12) / 2,
+        marginTop: -(ringSize + 12) / 2,
+        overflow: 'visible',
         pointerEvents: 'none',
         animation: 'telescopeZoomPreviousSpin 7.5s linear infinite',
       }}
@@ -81,8 +84,8 @@ function PreviousOrbitLabel({ compact = false }: { compact?: boolean }) {
       <span
         style={{
           position: 'absolute',
-          left: 0,
-          top: 0,
+          left: '50%',
+          top: '50%',
           width: ringSize,
           height: ringSize,
           border: '1px solid rgba(190, 205, 240, 0.3)',
@@ -98,10 +101,10 @@ function PreviousOrbitLabel({ compact = false }: { compact?: boolean }) {
             key={`${letter}-${index}`}
             style={{
               position: 'absolute',
-              left: 0,
-              top: 0,
-              width: '1em',
-              height: '1em',
+              left: '50%',
+              top: '50%',
+              minWidth: '1.15em',
+              minHeight: '1.15em',
               display: 'grid',
               placeItems: 'center',
               transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-${orbitRadius}px)`,
@@ -162,8 +165,8 @@ export function TelescopeZoomLadder({
     >
       <style>{`
         @keyframes telescopeZoomPreviousSpin {
-          from { transform: translate(-50%, -50%) rotate(0deg); }
-          to { transform: translate(-50%, -50%) rotate(-360deg); }
+          from { transform: rotate(0deg); }
+          to { transform: rotate(-360deg); }
         }
       `}</style>
 
@@ -251,6 +254,7 @@ export function TelescopeZoomLadder({
               justifyContent: 'center',
               width: slotSize,
               height: slotSize,
+              overflow: 'visible',
             }}
           >
             {slotEmotion ? (
